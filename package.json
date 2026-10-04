@@ -2,6 +2,7 @@
   "name": "reuse_be",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "module",
   "scripts": {
   "dev": "nodemon src/server.js",
   "check": "node --check src/app.js && node --check src/server.js",
