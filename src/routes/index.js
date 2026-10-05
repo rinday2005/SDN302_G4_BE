@@ -4,7 +4,7 @@ import authRoutes from "../modules/auth/auth.routes.js";
 
 const router = Router();
 
-router.get("/health", (req, res) => {
+router.get("/api/health", (req, res) => {
   return successResponse(res, "ReUse Hub API is running", {
     status: "ok",
   });

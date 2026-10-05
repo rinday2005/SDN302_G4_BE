@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import User from "../user/user.model.js";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../../config/env.js";
 
-const register = async ({ email, password, fullName, phoneNumber }) => {
+const register = async ({ email, password, fullName, phoneNumber, role }) => {
   const existingUser = await User.findOne({ email });
 
   if (existingUser) {
@@ -21,6 +21,7 @@ const register = async ({ email, password, fullName, phoneNumber }) => {
     passwordHash,
     fullName,
     phoneNumber,
+    role: role || "USER"
   });
 
   return {
