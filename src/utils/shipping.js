@@ -1,38 +1,14 @@
-const REGIONS = {
-  NORTH: [
-    'Hà Nội', 'Hải Phòng', 'Hải Dương', 'Hưng Yên', 'Bắc Ninh', 'Hà Nam', 'Nam Định',
-    'Ninh Bình', 'Thái Bình', 'Vĩnh Phúc', 'Hà Giang', 'Cao Bằng', 'Bắc Kạn',
-    'Lạng Sơn', 'Tuyên Quang', 'Thái Nguyên', 'Phú Thọ', 'Bắc Giang', 'Quảng Ninh',
-    'Lào Cai', 'Yên Bái', 'Điện Biên', 'Hòa Bình', 'Lai Châu', 'Sơn La',
-  ],
-  CENTRAL: [
-    'Thanh Hóa', 'Nghệ An', 'Hà Tĩnh', 'Quảng Bình', 'Quảng Trị', 'Thừa Thiên Huế', 'Huế',
-    'Đà Nẵng', 'Quảng Nam', 'Quảng Ngãi', 'Bình Định', 'Phú Yên', 'Khánh Hòa',
-    'Ninh Thuận', 'Bình Thuận', 'Kon Tum', 'Gia Lai', 'Đắk Lắk', 'Đắk Nông', 'Lâm Đồng',
-  ],
-  SOUTH: [
-    'Hồ Chí Minh', 'TP Hồ Chí Minh', 'TP.HCM', 'Bình Dương', 'Bình Phước', 'Đồng Nai',
-    'Tây Ninh', 'Bà Rịa - Vũng Tàu', 'Long An', 'Đồng Tháp', 'Tiền Giang', 'An Giang',
-    'Bến Tre', 'Vĩnh Long', 'Trà Vinh', 'Hậu Giang', 'Kiên Giang', 'Sóc Trăng',
-    'Bạc Liêu', 'Cà Mau', 'Cần Thơ',
-  ],
-};
+import { REGIONS, SHIPPING_RATES } from './regionData.js';
 
-const SHIPPING_RATES = {
-  LOCAL: 25000,
-  REGIONAL: 35000,
-  INTER_REGION: 45000,
-};
-
-const normalizeString = (str) => {
-  return str ? str.trim().toLowerCase() : '';
+const normalizeProvince = (province) => {
+  return province ? province.trim().toLowerCase() : '';
 };
 
 const getRegion = (province) => {
-  const normProvince = normalizeString(province);
+  const normalized = normalizeProvince(province);
 
   for (const [region, provinces] of Object.entries(REGIONS)) {
-    if (provinces.some((p) => normalizeString(p) === normProvince)) {
+    if (provinces.some((p) => normalizeProvince(p) === normalized)) {
       return region;
     }
   }
@@ -40,17 +16,17 @@ const getRegion = (province) => {
 };
 
 /**
- * Tính phí vận chuyển theo khu vực
- * @param {string} shopProvince - Tỉnh/Thành phố của shop
- * @param {string} userProvince - Tỉnh/Thành phố của người thuê/mua
+ * Tính phí shipping theo khu vực giữa shop và người dùng
+ * @param {string} shopProvince - Tỉnh/Thành của shop
+ * @param {string} userProvince - Tỉnh/Thành của người dùng
  * @returns {number} Phí vận chuyển (VND)
  */
 export const calculateShippingFee = (shopProvince, userProvince) => {
   if (!shopProvince || !userProvince) {
-    throw new Error('Vui lòng cung cấp đầy đủ tỉnh/thành phố của shop và người nhận');
+    throw new Error('Vui lòng cung cấp đầy đủ thông tin tỉnh/thành phố');
   }
 
-  if (normalizeString(shopProvince) === normalizeString(userProvince)) {
+  if (normalizeProvince(shopProvince) === normalizeProvince(userProvince)) {
     return SHIPPING_RATES.LOCAL;
   }
 
