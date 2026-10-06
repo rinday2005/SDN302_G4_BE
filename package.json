@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "check": "node --check src/app.js && node --check src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/server.js",
+    "seed:master": "node seed/seed.master.js"
   },
   "keywords": [],
   "author": "",
