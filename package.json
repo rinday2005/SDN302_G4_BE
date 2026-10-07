@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "seed:master": "node seed/seed.master.js"
+    "seed:master": "node seed/seed.master.js",
+    "check": "find src seed -name '*.js' -print0 | xargs -0 -n1 node --check"
   },
   "keywords": [],
   "author": "",
