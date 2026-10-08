@@ -30,4 +30,9 @@ router.use("/api/orders", orderRoutes);
 router.use("/api/payments", paymentRoutes);
 router.use("/api", uploadRoutes);
 
+// NOTE [An - BE-S1-07]:
+// Register Category routes only. Existing routes are unchanged.
+router.use("/api/categories", publicCategoryRouter);
+router.use("/api/admin/categories", adminCategoryRouter);
+
 export default router;
