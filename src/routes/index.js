@@ -9,6 +9,10 @@ import {
   publicCategoryRouter,
   adminCategoryRouter,
 } from "../modules/category/category.route.js";
+import orderRoutes from "../modules/rent/order/order.route.js";
+import paymentRoutes from "../modules/payment/payment.route.js";
+import productRoutes from "../modules/rent/product/product.route.js";
+import uploadRoutes from "./upload.routes.js";
 
 const router = Router();
 
@@ -19,6 +23,12 @@ router.get("/api/health", (req, res) => {
 });
 
 router.use("/api/auth", authRoutes);
+router.use("/api/categories", publicCategoryRouter);
+router.use("/api/admin/categories", adminCategoryRouter);
+router.use("/api/products", productRoutes);
+router.use("/api/orders", orderRoutes);
+router.use("/api/payments", paymentRoutes);
+router.use("/api", uploadRoutes);
 
 // NOTE [An - BE-S1-07]:
 // Register Category routes only. Existing routes are unchanged.

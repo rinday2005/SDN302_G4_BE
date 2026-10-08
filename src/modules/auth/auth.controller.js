@@ -1,4 +1,4 @@
-import { register, login, logout } from "./auth.service.js";
+import { register, login, logout, getShopOwnerStatus } from "./auth.service.js";
 import { successResponse } from "../../utils/response.js";
 
 const registerController = async (req, res, next) => {
@@ -44,8 +44,23 @@ const logoutController = async (req, res, next) => {
   }
 };
 
+const getShopOwnerStatusController = async (req, res, next) => {
+  try {
+    const result = await getShopOwnerStatus();
+
+    return successResponse(
+      res,
+      "Shop owner status retrieved successfully",
+      result
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   registerController,
   loginController,
   logoutController,
+  getShopOwnerStatusController,
 };

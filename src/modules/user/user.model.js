@@ -76,6 +76,15 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// Ensure only one user can have the role SHOP_OWNER in the database
+userSchema.index(
+  { role: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { role: "SHOP_OWNER" },
+  }
+);
+
 const User = mongoose.model("User", userSchema);
 
 export default User;
