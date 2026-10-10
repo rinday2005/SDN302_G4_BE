@@ -11,6 +11,7 @@ import mongoose from "mongoose";
 export const RENTAL_ORDER_STATUS = Object.freeze({
   PENDING: "PENDING", // Renter vừa đặt, chờ Shop Owner duyệt
   WAITING_PAYMENT: "WAITING_PAYMENT", // Shop Owner đã duyệt, chờ thanh toán
+  PAID: "PAID", // Renter đã thanh toán thành công
   CONFIRMED: "CONFIRMED", // Đã xác nhận / thanh toán
   REJECTED: "REJECTED", // Shop Owner từ chối đơn
   PREPARING: "PREPARING", // Shop đang chuẩn bị hàng
@@ -25,7 +26,8 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
 // Các bước chuyển trạng thái hợp lệ
 export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
-  WAITING_PAYMENT: ["CONFIRMED", "PREPARING", "CANCELLED"],
+  WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED"],
+  PAID: ["CONFIRMED", "PREPARING", "CANCELLED"],
   CONFIRMED: ["PREPARING", "CANCELLED"],
   PREPARING: ["SHIPPING", "CANCELLED"],
   SHIPPING: ["DELIVERED"],
@@ -212,6 +214,12 @@ const rentalOrderSchema = new mongoose.Schema(
         message: "status không hợp lệ",
       },
       default: RENTAL_ORDER_STATUS.PENDING,
+      index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["PENDING", "PAID", "FAILED"],
+      default: "PENDING",
       index: true,
     },
     rejectionReason: {
