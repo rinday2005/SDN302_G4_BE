@@ -8,6 +8,8 @@ import {
   getAllOrdersController,
   updateOrderStatusController,
   cancelOrderController,
+  approveOrderController,
+  rejectOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
@@ -27,6 +29,12 @@ router.get("/my-orders", getUserOrdersController);
 
 // Shop Owner xem đơn thuê của shop / Admin xem tất cả
 router.get("/shop", authorize(["SHOP_OWNER", "ADMIN"]), getAllOrdersController);
+
+// Shop Owner phê duyệt đơn thuê -> chuyển sang WAITING_PAYMENT
+router.post("/:id/approve", authorize(["SHOP_OWNER"]), approveOrderController);
+
+// Shop Owner từ chối đơn thuê -> chuyển sang REJECTED và giải phóng reservation
+router.post("/:id/reject", authorize(["SHOP_OWNER"]), rejectOrderController);
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)
 router.get("/:id", getOrderByIdController);

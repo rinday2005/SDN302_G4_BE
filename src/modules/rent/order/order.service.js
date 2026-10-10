@@ -294,6 +294,81 @@ const cancelOrder = async (orderId, user) => {
   return order;
 };
 
+/**
+ * Phê duyệt đơn thuê (Chỉ Shop Owner duy nhất của hệ thống)
+ * Chuyển trạng thái đơn sang WAITING_PAYMENT
+ */
+const approveOrder = async (orderId, user) => {
+  assertValidOrderId(orderId);
+
+  if (user.role !== "SHOP_OWNER") {
+    throw createError("Chỉ Shop Owner mới có quyền phê duyệt đơn thuê", 403, "FORBIDDEN");
+  }
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
+  }
+
+  if (order.shopOwnerId.toString() !== user._id.toString()) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
+  }
+
+  // AC: order đã xử lý không thể approve/reject lại
+  if (order.status !== RENTAL_ORDER_STATUS.PENDING) {
+    throw createError(
+      `Đơn hàng đã được xử lý hoặc không ở trạng thái chờ duyệt (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_ALREADY_PROCESSED"
+    );
+  }
+
+  // AC: khi approve toàn bộ đơn chuyển WAITING_PAYMENT (toàn bộ items cùng được xử lý)
+  order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
+  await order.save();
+
+  return order;
+};
+
+/**
+ * Từ chối đơn thuê (Chỉ Shop Owner duy nhất của hệ thống)
+ * Chuyển trạng thái đơn sang REJECTED và giải phóng reservation
+ */
+const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
+  assertValidOrderId(orderId);
+
+  if (user.role !== "SHOP_OWNER") {
+    throw createError("Chỉ Shop Owner mới có quyền từ chối đơn thuê", 403, "FORBIDDEN");
+  }
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
+  }
+
+  if (order.shopOwnerId.toString() !== user._id.toString()) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
+  }
+
+  // AC: order đã xử lý không thể approve/reject lại
+  if (order.status !== RENTAL_ORDER_STATUS.PENDING) {
+    throw createError(
+      `Đơn hàng đã được xử lý hoặc không ở trạng thái chờ duyệt (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_ALREADY_PROCESSED"
+    );
+  }
+
+  // AC: khi reject toàn bộ đơn chuyển REJECTED và giải phóng reservation
+  order.status = RENTAL_ORDER_STATUS.REJECTED;
+  if (reason) {
+    order.rejectionReason = reason.trim();
+  }
+  await order.save();
+
+  return order;
+};
+
 export {
   createOrder,
   getUserOrders,
@@ -301,4 +376,6 @@ export {
   getAllOrders,
   updateOrderStatus,
   cancelOrder,
+  approveOrder,
+  rejectOrder,
 };

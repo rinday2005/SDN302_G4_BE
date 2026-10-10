@@ -5,6 +5,8 @@ import {
   getAllOrders,
   updateOrderStatus,
   cancelOrder,
+  approveOrder,
+  rejectOrder,
 } from "./order.service.js";
 import { successResponse } from "../../../utils/response.js";
 
@@ -73,6 +75,28 @@ const cancelOrderController = async (req, res, next) => {
   }
 };
 
+const approveOrderController = async (req, res, next) => {
+  try {
+    const order = await approveOrder(req.params.id, req.user);
+
+    return successResponse(res, "Order approved successfully. Waiting for payment.", order);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const rejectOrderController = async (req, res, next) => {
+  try {
+    const order = await rejectOrder(req.params.id, req.user, {
+      reason: req.body?.reason,
+    });
+
+    return successResponse(res, "Order rejected successfully", order);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -80,4 +104,6 @@ export {
   getAllOrdersController,
   updateOrderStatusController,
   cancelOrderController,
+  approveOrderController,
+  rejectOrderController,
 };

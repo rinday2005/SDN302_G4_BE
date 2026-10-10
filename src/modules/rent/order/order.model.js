@@ -9,8 +9,9 @@ import mongoose from "mongoose";
  *    └──► CANCELLED ◄────────────┘
  */
 export const RENTAL_ORDER_STATUS = Object.freeze({
-  PENDING: "PENDING", // Renter vừa đặt, chờ Shop Owner xác nhận
-  CONFIRMED: "CONFIRMED", // Shop Owner đã xác nhận đơn
+  PENDING: "PENDING", // Renter vừa đặt, chờ Shop Owner duyệt
+  WAITING_PAYMENT: "WAITING_PAYMENT", // Shop Owner đã duyệt, chờ thanh toán
+  CONFIRMED: "CONFIRMED", // Đã xác nhận / thanh toán
   REJECTED: "REJECTED", // Shop Owner từ chối đơn
   PREPARING: "PREPARING", // Shop đang chuẩn bị hàng
   SHIPPING: "SHIPPING", // Đang giao hàng tới Renter
@@ -23,7 +24,8 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
 
 // Các bước chuyển trạng thái hợp lệ
 export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
-  PENDING: ["CONFIRMED", "REJECTED", "CANCELLED"],
+  PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
+  WAITING_PAYMENT: ["CONFIRMED", "PREPARING", "CANCELLED"],
   CONFIRMED: ["PREPARING", "CANCELLED"],
   PREPARING: ["SHIPPING", "CANCELLED"],
   SHIPPING: ["DELIVERED"],
@@ -211,6 +213,11 @@ const rentalOrderSchema = new mongoose.Schema(
       },
       default: RENTAL_ORDER_STATUS.PENDING,
       index: true,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: "",
     },
     shippingDetails: {
       type: shippingDetailsSchema,
