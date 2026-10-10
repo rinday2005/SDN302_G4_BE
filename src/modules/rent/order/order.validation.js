@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { RENTAL_ORDER_STATUS } from "./order.model.js";
 
 const fail = (next, message, errorCode) => {
@@ -8,25 +7,10 @@ const fail = (next, message, errorCode) => {
   return next(error);
 };
 
+// POST /api/rent/orders  body: { startDate, endDate, shippingAddress }
+// RENT items được lấy từ Cart của user, không nhận từ client
 const validateCreateOrder = (req, res, next) => {
-  const { items, startDate, endDate, shippingAddress } = req.body;
-
-  if (!Array.isArray(items) || items.length === 0) {
-    return fail(next, "Order must contain at least one item", "EMPTY_ORDER_ITEMS");
-  }
-
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const itemIndex = i + 1;
-
-    if (!item || !mongoose.Types.ObjectId.isValid(item.productId)) {
-      return fail(next, `Item #${itemIndex}: productId không hợp lệ`, "INVALID_PRODUCT_ID");
-    }
-
-    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-      return fail(next, `Item #${itemIndex}: Quantity must be a positive integer`, "INVALID_QUANTITY");
-    }
-  }
+  const { startDate, endDate, shippingAddress } = req.body;
 
   const start = new Date(startDate);
   const end = new Date(endDate);
@@ -37,6 +21,12 @@ const validateCreateOrder = (req, res, next) => {
 
   if (!endDate || isNaN(end.getTime())) {
     return fail(next, "Valid endDate is required", "INVALID_END_DATE");
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (start < today) {
+    return fail(next, "startDate cannot be in the past", "START_DATE_IN_PAST");
   }
 
   if (end < start) {

@@ -11,8 +11,7 @@ import { successResponse } from "../../../utils/response.js";
 const createOrderController = async (req, res, next) => {
   try {
     const order = await createOrder({
-      renterId: req.user._id,
-      items: req.body.items,
+      user: req.user,
       startDate: req.body.startDate,
       endDate: req.body.endDate,
       shippingAddress: req.body.shippingAddress,

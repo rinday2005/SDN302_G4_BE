@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
-import RentalOrder, { canTransitionStatus } from "./order.model.js";
+import RentalOrder, { canTransitionStatus, RENTAL_ORDER_STATUS } from "./order.model.js";
 import RentalProduct from "../product/product.model.js";
+import Cart from "../../cart/cart.model.js";
+import { removeRentItems } from "../../cart/cart.service.js";
+import { checkRentalAvailability } from "../availability/availability.service.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
 
@@ -21,25 +24,31 @@ const assertValidOrderId = (orderId) => {
 };
 
 /**
- * Tạo đơn thuê mới chứa nhiều sản phẩm RENT của cùng 1 Shop Owner
- * items: [{ productId, quantity }]
+ * Checkout RENT: tạo đúng 1 RentalOrder cho toàn bộ RENT items trong Cart của user
  */
-const createOrder = async ({
-  renterId,
-  items,
-  startDate,
-  endDate,
-  shippingAddress,
-}) => {
+const createOrder = async ({ user, startDate, endDate, shippingAddress }) => {
+  // 1. User phải được duyệt KYC
+  if (user.kycStatus !== "APPROVED") {
+    throw createError("Tài khoản cần được duyệt KYC trước khi thuê", 403, "KYC_NOT_APPROVED");
+  }
+
+  // 2. AC: Không thể checkout nếu Cart RENT trống
+  const cart = await Cart.findOne({ userId: user._id });
+  const rentItems = cart?.rentItems || [];
+  if (rentItems.length === 0) {
+    throw createError("Giỏ hàng thuê đang trống", 400, "EMPTY_RENT_CART");
+  }
+
+  const renterId = user._id;
   const start = new Date(startDate);
   const end = new Date(endDate);
+  // Số ngày thuê dùng chung cho toàn bộ RENT items
   const rentalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / MS_PER_DAY));
 
-  // Gộp các item trùng productId
   const quantityByProduct = new Map();
-  for (const item of items) {
+  for (const item of rentItems) {
     const key = item.productId.toString();
-    quantityByProduct.set(key, (quantityByProduct.get(key) || 0) + Number(item.quantity));
+    quantityByProduct.set(key, (quantityByProduct.get(key) || 0) + item.quantity);
   }
 
   const products = await RentalProduct.find({
@@ -48,7 +57,11 @@ const createOrder = async ({
   });
 
   if (products.length !== quantityByProduct.size) {
-    throw createError("Một hoặc nhiều sản phẩm không tồn tại hoặc chưa được duyệt", 404, "PRODUCT_NOT_FOUND");
+    throw createError(
+      "Một hoặc nhiều sản phẩm trong giỏ không còn tồn tại hoặc chưa được duyệt",
+      404,
+      "PRODUCT_NOT_FOUND"
+    );
   }
 
   // AC: shopOwnerId luôn là Shop Owner duy nhất
@@ -57,6 +70,17 @@ const createOrder = async ({
     throw createError("Tất cả sản phẩm trong đơn thuê phải thuộc cùng 1 Shop Owner", 400, "MULTIPLE_SHOP_OWNERS");
   }
   const shopOwnerId = [...ownerIds][0];
+
+  // 3. AC: Không thể checkout khi một item hết hàng trong khoảng ngày thuê
+  for (const product of products) {
+    const quantity = quantityByProduct.get(product._id.toString());
+    try {
+      await checkRentalAvailability(product._id, start, end, quantity);
+    } catch (error) {
+      error.message = `${product.name}: ${error.message}`;
+      throw error;
+    }
+  }
 
   let rentalFee = 0;
   let depositAmount = 0;
@@ -87,12 +111,13 @@ const createOrder = async ({
     shippingFee = 35000;
   }
 
+  // AC: totalAmount = tổng chi phí tất cả item (thuê + cọc) + shipping (tính 1 lần)
   const totalAmount = rentalFee + depositAmount + shippingFee;
 
   const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
   const orderCode = `RO-${Date.now()}-${randomSuffix}`;
 
-  return RentalOrder.create({
+  const order = await RentalOrder.create({
     orderCode,
     renterId,
     shopOwnerId,
@@ -111,7 +136,17 @@ const createOrder = async ({
       ward: shippingAddress.ward.trim(),
       detail: shippingAddress.detail.trim(),
     },
+    // AC: order ban đầu PENDING
+    status: RENTAL_ORDER_STATUS.PENDING,
   });
+
+  // 4. Loại các RENT items đã checkout khỏi Cart
+  await removeRentItems(
+    renterId,
+    products.map((p) => p._id)
+  );
+
+  return order;
 };
 
 /**
