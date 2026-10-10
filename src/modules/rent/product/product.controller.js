@@ -1,61 +1,46 @@
-import {
-  getProducts,
-  getProductById,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-} from "./product.service.js";
-import { successResponse } from "../../../utils/response.js";
+import * as productService from './product.service.js';
 
-const getProductsController = async (req, res, next) => {
+export const createProduct = async (req, res, next) => {
   try {
-    const result = await getProducts(req.query);
-    return successResponse(res, "Products retrieved successfully", result);
+    const product = await productService.createProduct(req.user._id, req.body);
+    return res.status(201).json({
+      success: true,
+      message: 'Tạo sản phẩm cho thuê thành công',
+      data: product,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-const getProductByIdController = async (req, res, next) => {
+export const updateProduct = async (req, res, next) => {
   try {
-    const product = await getProductById(req.params.id);
-    return successResponse(res, "Product retrieved successfully", product);
+    const updated = await productService.updateProduct(
+      req.params.id,
+      req.user._id,
+      req.body
+    );
+    return res.status(200).json({
+      success: true,
+      message: 'Cập nhật sản phẩm thành công',
+      data: updated,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-const createProductController = async (req, res, next) => {
+export const deleteProduct = async (req, res, next) => {
   try {
-    const product = await createProduct(req.body);
-    return successResponse(res, "Product created successfully", product, 201);
+    const result = await productService.deleteProduct(
+      req.params.id,
+      req.user._id
+    );
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
   } catch (error) {
     next(error);
   }
-};
-
-const updateProductController = async (req, res, next) => {
-  try {
-    const product = await updateProduct(req.params.id, req.body);
-    return successResponse(res, "Product updated successfully", product);
-  } catch (error) {
-    next(error);
-  }
-};
-
-const deleteProductController = async (req, res, next) => {
-  try {
-    const product = await deleteProduct(req.params.id);
-    return successResponse(res, "Product deleted successfully", product);
-  } catch (error) {
-    next(error);
-  }
-};
-
-export {
-  getProductsController,
-  getProductByIdController,
-  createProductController,
-  updateProductController,
-  deleteProductController,
 };

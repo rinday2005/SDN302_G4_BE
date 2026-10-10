@@ -1,48 +1,25 @@
-import { Router } from "express";
-import authMiddleware from "../../../middleware/auth.middleware.js";
-import authorize from "../../../middleware/role.middleware.js";
+import express from 'express';
+import * as productController from './product.controller.js';
+import authMiddleware from '../../../middleware/auth.middleware.js';
 
-import {
-  getProductsController,
-  getProductByIdController,
-  createProductController,
-  updateProductController,
-  deleteProductController,
-} from "./product.controller.js";
+const router = express.Router();
 
-import {
-  validateCreateProduct,
-  validateUpdateProduct,
-} from "./product.validation.js";
+// Middleware chặn User/Admin tạo hoặc thao tác với tư cách Shop Owner
+const requireShopOwner = (req, res, next) => {
+  if (!req.user || req.user.role !== 'SHOP_OWNER') {
+    const error = new Error('Chỉ Shop Owner mới có quyền thực hiện thao tác này');
+    error.statusCode = 403;
+    error.errorCode = 'FORBIDDEN';
+    return next(error);
+  }
+  next();
+};
 
-const router = Router();
+router.use(authMiddleware);
+router.use(requireShopOwner);
 
-// Public routes
-router.get("/", getProductsController);
-router.get("/:id", getProductByIdController);
-
-// Shop Owner & Admin routes
-router.post(
-  "/",
-  authMiddleware,
-  authorize(["SHOP_OWNER", "ADMIN"]),
-  validateCreateProduct,
-  createProductController
-);
-
-router.put(
-  "/:id",
-  authMiddleware,
-  authorize(["SHOP_OWNER", "ADMIN"]),
-  validateUpdateProduct,
-  updateProductController
-);
-
-router.delete(
-  "/:id",
-  authMiddleware,
-  authorize(["SHOP_OWNER", "ADMIN"]),
-  deleteProductController
-);
+router.post('/', productController.createProduct);
+router.put('/:id', productController.updateProduct);
+router.delete('/:id', productController.deleteProduct);
 
 export default router;
