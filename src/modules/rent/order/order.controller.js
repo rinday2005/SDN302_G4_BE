@@ -8,6 +8,7 @@ import {
   approveOrder,
   rejectOrder,
   handoverOrder,
+  confirmReceivedOrder,
 } from "./order.service.js";
 import { successResponse } from "../../../utils/response.js";
 
@@ -116,6 +117,20 @@ const handoverOrderController = async (req, res, next) => {
   }
 };
 
+const confirmReceivedOrderController = async (req, res, next) => {
+  try {
+    const order = await confirmReceivedOrder(req.params.id, req.user);
+
+    return successResponse(
+      res,
+      "Order confirmed received successfully. Rental period has started.",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -126,4 +141,5 @@ export {
   approveOrderController,
   rejectOrderController,
   handoverOrderController,
+  confirmReceivedOrderController,
 };

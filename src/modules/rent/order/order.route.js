@@ -11,6 +11,7 @@ import {
   approveOrderController,
   rejectOrderController,
   handoverOrderController,
+  confirmReceivedOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
@@ -44,6 +45,13 @@ router.post(
   authorize(["SHOP_OWNER"]),
   validateHandoverOrder,
   handoverOrderController
+);
+
+// [BE-S3-07] Renter xác nhận đã nhận đồ & bắt đầu tính thời gian thuê
+router.post(
+  "/:id/confirm-received",
+  authorize(["USER"]),
+  confirmReceivedOrderController
 );
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)

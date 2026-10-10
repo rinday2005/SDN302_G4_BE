@@ -18,7 +18,8 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   REJECTED: "REJECTED", // Shop Owner từ chối đơn
   PREPARING: "PREPARING", // Shop đang chuẩn bị hàng
   SHIPPING: "SHIPPING", // Đang giao hàng tới Renter
-  DELIVERED: "DELIVERED", // Renter đã nhận hàng (đang trong thời gian thuê)
+  DELIVERED: "DELIVERED", // Hàng đã được giao tới địa chỉ
+  RENTING: "RENTING", // Renter đã nhận đồ và bắt đầu tính thời gian thuê
   RETURNING: "RETURNING", // Renter đang gửi trả hàng
   RETURNED: "RETURNED", // Shop đã nhận lại hàng, chờ kiểm tra / hoàn cọc
   COMPLETED: "COMPLETED", // Hoàn tất đơn thuê
@@ -31,11 +32,12 @@ export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED"],
   PAID: ["READY_FOR_HANDOVER", "HANDED_OVER", "CONFIRMED", "PREPARING", "CANCELLED"],
   READY_FOR_HANDOVER: ["HANDED_OVER", "SHIPPING", "CANCELLED"],
-  HANDED_OVER: ["SHIPPING", "DELIVERED", "CANCELLED"],
+  HANDED_OVER: ["SHIPPING", "DELIVERED", "RENTING", "CANCELLED"],
   CONFIRMED: ["PREPARING", "READY_FOR_HANDOVER", "HANDED_OVER", "CANCELLED"],
   PREPARING: ["READY_FOR_HANDOVER", "HANDED_OVER", "SHIPPING", "CANCELLED"],
-  SHIPPING: ["DELIVERED"],
-  DELIVERED: ["RETURNING"],
+  SHIPPING: ["DELIVERED", "RENTING"],
+  DELIVERED: ["RENTING", "RETURNING"],
+  RENTING: ["RETURNING", "COMPLETED"],
   RETURNING: ["RETURNED"],
   RETURNED: ["COMPLETED"],
   REJECTED: [],
@@ -231,6 +233,10 @@ const rentalOrderSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    receivedAt: {
+      type: Date,
+      default: null,
     },
     shippingDetails: {
       type: shippingDetailsSchema,

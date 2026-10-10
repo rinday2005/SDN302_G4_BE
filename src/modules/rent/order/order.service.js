@@ -428,6 +428,58 @@ const handoverOrder = async (
   return order;
 };
 
+/**
+ * [BE-S3-07] Xác nhận đã nhận đồ & bắt đầu tính thời gian thuê (Renter)
+ * Chỉ renterId của order mới được xác nhận
+ * Chuyển trạng thái sang RENTING và lưu timestamp receivedAt
+ */
+const confirmReceivedOrder = async (orderId, user) => {
+  assertValidOrderId(orderId);
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  // AC: Chỉ renterId của order mới được xác nhận (User khác không thể gọi API)
+  if (order.renterId.toString() !== user._id.toString()) {
+    throw createError(
+      "Chỉ người thuê của đơn hàng mới có quyền xác nhận đã nhận đồ",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  // AC: order chỉ chuyển RENTING từ trạng thái hợp lệ
+  const validCurrentStatuses = [
+    RENTAL_ORDER_STATUS.HANDED_OVER,
+    RENTAL_ORDER_STATUS.SHIPPING,
+    RENTAL_ORDER_STATUS.DELIVERED,
+  ];
+
+  if (!validCurrentStatuses.includes(order.status)) {
+    throw createError(
+      `Đơn hàng chưa ở trạng thái vận chuyển để xác nhận nhận hàng (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_NOT_READY_TO_RECEIVE"
+    );
+  }
+
+  const receivedTimestamp = new Date();
+
+  // AC: lưu timestamp xác nhận (bắt đầu tính thời gian thuê thực tế)
+  order.receivedAt = receivedTimestamp;
+  if (order.shippingDetails) {
+    order.shippingDetails.deliveredAt = order.shippingDetails.deliveredAt || receivedTimestamp;
+  }
+
+  // AC: order chuyển sang RENTING
+  order.status = RENTAL_ORDER_STATUS.RENTING;
+  await order.save();
+
+  return order;
+};
+
 export {
   createOrder,
   getUserOrders,
@@ -438,4 +490,5 @@ export {
   approveOrder,
   rejectOrder,
   handoverOrder,
+  confirmReceivedOrder,
 };
