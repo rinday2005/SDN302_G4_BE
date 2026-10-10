@@ -1,90 +1,108 @@
 import mongoose from "mongoose";
-import Order from "./order.model.js";
+import RentalOrder, { canTransitionStatus } from "./order.model.js";
+import RentalProduct from "../product/product.model.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
 
 const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const createError = (message, statusCode, errorCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.errorCode = errorCode;
+  return error;
+};
+
+const assertValidOrderId = (orderId) => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    throw createError("Invalid order id", 400, "INVALID_ORDER_ID");
+  }
+};
 
 /**
- * Tạo đơn hàng mới hỗ trợ thanh toán nhiều món đồ cùng lúc (Multi-item checkout)
+ * Tạo đơn thuê mới chứa nhiều sản phẩm RENT của cùng 1 Shop Owner
+ * items: [{ productId, quantity }]
  */
 const createOrder = async ({
-  userId,
+  renterId,
   items,
+  startDate,
+  endDate,
   shippingAddress,
-  paymentMethod = "COD",
-  note = "",
 }) => {
-  // Lấy thông tin Shop Owner duy nhất trong hệ thống để xác định vị trí shop tính phí ship
-  const shopOwner = await User.findOne({ role: "SHOP_OWNER" });
-  const shopProvince = shopOwner?.address?.province || DEFAULT_SHOP_PROVINCE;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const rentalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / MS_PER_DAY));
 
-  // Tính phí vận chuyển theo khu vực giữa địa chỉ shop và địa chỉ khách hàng
-  let shippingFee = 30000;
-  try {
-    shippingFee = calculateShippingFee(shopProvince, shippingAddress.province);
-  } catch (error) {
-    // Nếu tỉnh thành nhập chưa chuẩn theo mapping thì áp dụng phí vùng tiêu chuẩn
-    shippingFee = 35000;
+  // Gộp các item trùng productId
+  const quantityByProduct = new Map();
+  for (const item of items) {
+    const key = item.productId.toString();
+    quantityByProduct.set(key, (quantityByProduct.get(key) || 0) + Number(item.quantity));
   }
 
-  let subtotal = 0;
-  let totalDeposit = 0;
+  const products = await RentalProduct.find({
+    _id: { $in: [...quantityByProduct.keys()] },
+    status: "APPROVED",
+  });
 
-  // Xử lý tính toán từng món đồ trong danh sách items
-  const processedItems = items.map((item) => {
-    const orderType = item.orderType || "RENT";
-    const quantity = Number(item.quantity) || 1;
-    const price = Number(item.price) || 0;
-    const depositPerItem = orderType === "RENT" ? Number(item.deposit || 0) : 0;
+  if (products.length !== quantityByProduct.size) {
+    throw createError("Một hoặc nhiều sản phẩm không tồn tại hoặc chưa được duyệt", 404, "PRODUCT_NOT_FOUND");
+  }
 
-    let rentalDays = 1;
-    let itemSubtotal = 0;
+  // AC: shopOwnerId luôn là Shop Owner duy nhất
+  const ownerIds = new Set(products.map((p) => p.ownerId.toString()));
+  if (ownerIds.size !== 1) {
+    throw createError("Tất cả sản phẩm trong đơn thuê phải thuộc cùng 1 Shop Owner", 400, "MULTIPLE_SHOP_OWNERS");
+  }
+  const shopOwnerId = [...ownerIds][0];
 
-    if (orderType === "RENT") {
-      const startDate = new Date(item.rentalStartDate);
-      const endDate = new Date(item.rentalEndDate);
-      const diffTime = endDate.getTime() - startDate.getTime();
-      rentalDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  let rentalFee = 0;
+  let depositAmount = 0;
 
-      itemSubtotal = price * rentalDays * quantity;
-    } else {
-      rentalDays = 0;
-      itemSubtotal = price * quantity;
-    }
-
-    const itemDeposit = depositPerItem * quantity;
-
-    subtotal += itemSubtotal;
-    totalDeposit += itemDeposit;
+  // Snapshot thông tin sản phẩm tại thời điểm đặt
+  const orderItems = products.map((product) => {
+    const quantity = quantityByProduct.get(product._id.toString());
+    rentalFee += product.pricePerDay * quantity * rentalDays;
+    depositAmount += product.depositAmount * quantity;
 
     return {
-      product: item.productId || item.product || null,
-      productName: item.productName.trim(),
-      productImage: item.productImage || "",
-      orderType,
+      productId: product._id,
+      productName: product.name,
       quantity,
-      size: item.size || "FreeSize",
-      rentalStartDate: item.rentalStartDate ? new Date(item.rentalStartDate) : null,
-      rentalEndDate: item.rentalEndDate ? new Date(item.rentalEndDate) : null,
-      rentalDays,
-      price,
-      deposit: depositPerItem,
-      itemSubtotal,
-      itemDeposit,
+      pricePerDay: product.pricePerDay,
+      depositAmount: product.depositAmount,
     };
   });
 
-  // Tổng số tiền thanh toán 1 lần cho cả đơn hàng
-  const totalAmount = subtotal + totalDeposit + shippingFee;
+  const shopOwner = await User.findById(shopOwnerId).select("address");
+  const shopProvince = shopOwner?.address?.province || DEFAULT_SHOP_PROVINCE;
+
+  let shippingFee;
+  try {
+    shippingFee = calculateShippingFee(shopProvince, shippingAddress.province);
+  } catch (error) {
+    // Tỉnh thành chưa chuẩn theo mapping thì áp dụng phí vùng tiêu chuẩn
+    shippingFee = 35000;
+  }
+
+  const totalAmount = rentalFee + depositAmount + shippingFee;
 
   const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const orderCode = `ORD-${Date.now()}-${randomSuffix}`;
+  const orderCode = `RO-${Date.now()}-${randomSuffix}`;
 
-  const order = await Order.create({
+  return RentalOrder.create({
     orderCode,
-    user: userId,
-    items: processedItems,
+    renterId,
+    shopOwnerId,
+    items: orderItems,
+    startDate: start,
+    endDate: end,
+    rentalFee,
+    depositAmount,
+    shippingFee,
+    totalAmount,
     shippingAddress: {
       recipientName: shippingAddress.recipientName.trim(),
       recipientPhone: shippingAddress.recipientPhone.trim(),
@@ -93,36 +111,21 @@ const createOrder = async ({
       ward: shippingAddress.ward.trim(),
       detail: shippingAddress.detail.trim(),
     },
-    subtotal,
-    totalDeposit,
-    shippingFee,
-    totalAmount,
-    paymentMethod,
-    paymentStatus: "PENDING",
-    orderStatus: "PENDING",
-    note: (note || "").trim(),
   });
-
-  return order;
 };
 
 /**
- * Lấy danh sách đơn hàng của người dùng hiện tại
+ * Lấy danh sách đơn thuê của Renter hiện tại
  */
-const getUserOrders = async (userId, { page = 1, limit = 10, status } = {}) => {
-  const query = { user: userId };
-  if (status) {
-    query.orderStatus = status;
-  }
+const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) => {
+  const query = { renterId };
+  if (status) query.status = status;
 
   const skip = (Number(page) - 1) * Number(limit);
 
   const [orders, total] = await Promise.all([
-    Order.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit)),
-    Order.countDocuments(query),
+    RentalOrder.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+    RentalOrder.countDocuments(query),
   ]);
 
   return {
@@ -137,61 +140,48 @@ const getUserOrders = async (userId, { page = 1, limit = 10, status } = {}) => {
 };
 
 /**
- * Lấy chi tiết đơn hàng
+ * Lấy chi tiết đơn thuê
  */
 const getOrderById = async (orderId, user) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    const error = new Error("Invalid order id");
-    error.statusCode = 400;
-    error.errorCode = "INVALID_ORDER_ID";
-    throw error;
-  }
+  assertValidOrderId(orderId);
 
-  const order = await Order.findById(orderId).populate("user", "fullName email phoneNumber");
+  const order = await RentalOrder.findById(orderId)
+    .populate("renterId", "fullName email phoneNumber")
+    .populate("shopOwnerId", "fullName email phoneNumber");
 
   if (!order) {
-    const error = new Error("Order not found");
-    error.statusCode = 404;
-    error.errorCode = "ORDER_NOT_FOUND";
-    throw error;
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  // Khách hàng thường chỉ xem được đơn của chính họ
-  const isOwner = order.user._id.toString() === user._id.toString();
-  const isStaff = ["SHOP_OWNER", "ADMIN"].includes(user.role);
+  const userId = user._id.toString();
+  const isRenter = order.renterId._id.toString() === userId;
+  const isShopOwner = order.shopOwnerId._id.toString() === userId;
+  const isAdmin = user.role === "ADMIN";
 
-  if (!isOwner && !isStaff) {
-    const error = new Error("Forbidden");
-    error.statusCode = 403;
-    error.errorCode = "FORBIDDEN";
-    throw error;
+  if (!isRenter && !isShopOwner && !isAdmin) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
   return order;
 };
 
 /**
- * Lấy toàn bộ đơn hàng của shop (Dành cho SHOP_OWNER và ADMIN)
+ * Lấy danh sách đơn thuê của shop (SHOP_OWNER chỉ thấy đơn của mình, ADMIN thấy tất cả)
  */
-const getAllOrders = async ({
-  page = 1,
-  limit = 10,
-  orderStatus,
-  paymentStatus,
-} = {}) => {
+const getAllOrders = async (user, { page = 1, limit = 10, status } = {}) => {
   const query = {};
-  if (orderStatus) query.orderStatus = orderStatus;
-  if (paymentStatus) query.paymentStatus = paymentStatus;
+  if (user.role === "SHOP_OWNER") query.shopOwnerId = user._id;
+  if (status) query.status = status;
 
   const skip = (Number(page) - 1) * Number(limit);
 
   const [orders, total] = await Promise.all([
-    Order.find(query)
-      .populate("user", "fullName email phoneNumber")
+    RentalOrder.find(query)
+      .populate("renterId", "fullName email phoneNumber")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit)),
-    Order.countDocuments(query),
+    RentalOrder.countDocuments(query),
   ]);
 
   return {
@@ -206,70 +196,64 @@ const getAllOrders = async ({
 };
 
 /**
- * Cập nhật trạng thái đơn hàng (Dành cho SHOP_OWNER và ADMIN)
+ * Cập nhật trạng thái đơn thuê theo vòng đời hợp lệ
  */
-const updateOrderStatus = async (orderId, orderStatus) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    const error = new Error("Invalid order id");
-    error.statusCode = 400;
-    error.errorCode = "INVALID_ORDER_ID";
-    throw error;
-  }
+const updateOrderStatus = async (orderId, status, user) => {
+  assertValidOrderId(orderId);
 
-  const order = await Order.findById(orderId);
-
+  const order = await RentalOrder.findById(orderId);
   if (!order) {
-    const error = new Error("Order not found");
-    error.statusCode = 404;
-    error.errorCode = "ORDER_NOT_FOUND";
-    throw error;
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  order.orderStatus = orderStatus;
+  if (user.role === "SHOP_OWNER" && order.shopOwnerId.toString() !== user._id.toString()) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
+  }
+
+  if (!canTransitionStatus(order.status, status)) {
+    throw createError(
+      `Không thể chuyển trạng thái từ ${order.status} sang ${status}`,
+      400,
+      "INVALID_STATUS_TRANSITION"
+    );
+  }
+
+  order.status = status;
   await order.save();
 
   return order;
 };
 
 /**
- * Hủy đơn hàng
+ * Hủy đơn thuê
  */
 const cancelOrder = async (orderId, user) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    const error = new Error("Invalid order id");
-    error.statusCode = 400;
-    error.errorCode = "INVALID_ORDER_ID";
-    throw error;
-  }
+  assertValidOrderId(orderId);
 
-  const order = await Order.findById(orderId);
-
+  const order = await RentalOrder.findById(orderId);
   if (!order) {
-    const error = new Error("Order not found");
-    error.statusCode = 404;
-    error.errorCode = "ORDER_NOT_FOUND";
-    throw error;
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  const isOwner = order.user.toString() === user._id.toString();
-  const isStaff = ["SHOP_OWNER", "ADMIN"].includes(user.role);
+  const userId = user._id.toString();
+  const isRenter = order.renterId.toString() === userId;
+  const isShopOwner = order.shopOwnerId.toString() === userId;
+  const isAdmin = user.role === "ADMIN";
 
-  if (!isOwner && !isStaff) {
-    const error = new Error("Forbidden");
-    error.statusCode = 403;
-    error.errorCode = "FORBIDDEN";
-    throw error;
+  if (!isRenter && !isShopOwner && !isAdmin) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
-  // Khách hàng chỉ có thể hủy khi đơn còn PENDING
-  if (isOwner && !isStaff && order.orderStatus !== "PENDING") {
-    const error = new Error("Cannot cancel order that has already been processed");
-    error.statusCode = 400;
-    error.errorCode = "ORDER_CANNOT_BE_CANCELLED";
-    throw error;
+  // Renter chỉ được hủy khi đơn còn PENDING
+  if (isRenter && !isShopOwner && !isAdmin && order.status !== "PENDING") {
+    throw createError("Cannot cancel order that has already been processed", 400, "ORDER_CANNOT_BE_CANCELLED");
   }
 
-  order.orderStatus = "CANCELLED";
+  if (!canTransitionStatus(order.status, "CANCELLED")) {
+    throw createError(`Không thể hủy đơn ở trạng thái ${order.status}`, 400, "ORDER_CANNOT_BE_CANCELLED");
+  }
+
+  order.status = "CANCELLED";
   await order.save();
 
   return order;

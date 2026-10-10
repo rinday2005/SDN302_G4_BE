@@ -11,11 +11,11 @@ import { successResponse } from "../../../utils/response.js";
 const createOrderController = async (req, res, next) => {
   try {
     const order = await createOrder({
-      userId: req.user._id,
+      renterId: req.user._id,
       items: req.body.items,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
       shippingAddress: req.body.shippingAddress,
-      paymentMethod: req.body.paymentMethod,
-      note: req.body.note,
     });
 
     return successResponse(res, "Order created successfully", order, 201);
@@ -46,7 +46,7 @@ const getOrderByIdController = async (req, res, next) => {
 
 const getAllOrdersController = async (req, res, next) => {
   try {
-    const result = await getAllOrders(req.query);
+    const result = await getAllOrders(req.user, req.query);
 
     return successResponse(res, "Shop orders retrieved successfully", result);
   } catch (error) {
@@ -56,7 +56,7 @@ const getAllOrdersController = async (req, res, next) => {
 
 const updateOrderStatusController = async (req, res, next) => {
   try {
-    const order = await updateOrderStatus(req.params.id, req.body.orderStatus);
+    const order = await updateOrderStatus(req.params.id, req.body.status, req.user);
 
     return successResponse(res, "Order status updated successfully", order);
   } catch (error) {
