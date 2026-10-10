@@ -10,10 +10,12 @@ import {
   cancelOrderController,
   approveOrderController,
   rejectOrderController,
+  handoverOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
   validateUpdateOrderStatus,
+  validateHandoverOrder,
 } from "./order.validation.js";
 
 const router = Router();
@@ -35,6 +37,14 @@ router.post("/:id/approve", authorize(["SHOP_OWNER"]), approveOrderController);
 
 // Shop Owner từ chối đơn thuê -> chuyển sang REJECTED và giải phóng reservation
 router.post("/:id/reject", authorize(["SHOP_OWNER"]), rejectOrderController);
+
+// [BE-S3-06] Shop Owner cập nhật thông tin bàn giao vận chuyển
+router.post(
+  "/:id/handover",
+  authorize(["SHOP_OWNER"]),
+  validateHandoverOrder,
+  handoverOrderController
+);
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)
 router.get("/:id", getOrderByIdController);

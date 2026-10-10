@@ -12,7 +12,9 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   PENDING: "PENDING", // Renter vừa đặt, chờ Shop Owner duyệt
   WAITING_PAYMENT: "WAITING_PAYMENT", // Shop Owner đã duyệt, chờ thanh toán
   PAID: "PAID", // Renter đã thanh toán thành công
-  CONFIRMED: "CONFIRMED", // Đã xác nhận / thanh toán
+  READY_FOR_HANDOVER: "READY_FOR_HANDOVER", // Chuẩn bị xong, sẵn sàng bàn giao cho đơn vị vận chuyển
+  HANDED_OVER: "HANDED_OVER", // Đã bàn giao cho đơn vị vận chuyển
+  CONFIRMED: "CONFIRMED", // Đã xác nhận
   REJECTED: "REJECTED", // Shop Owner từ chối đơn
   PREPARING: "PREPARING", // Shop đang chuẩn bị hàng
   SHIPPING: "SHIPPING", // Đang giao hàng tới Renter
@@ -27,9 +29,11 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
 export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
   WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED"],
-  PAID: ["CONFIRMED", "PREPARING", "CANCELLED"],
-  CONFIRMED: ["PREPARING", "CANCELLED"],
-  PREPARING: ["SHIPPING", "CANCELLED"],
+  PAID: ["READY_FOR_HANDOVER", "HANDED_OVER", "CONFIRMED", "PREPARING", "CANCELLED"],
+  READY_FOR_HANDOVER: ["HANDED_OVER", "SHIPPING", "CANCELLED"],
+  HANDED_OVER: ["SHIPPING", "DELIVERED", "CANCELLED"],
+  CONFIRMED: ["PREPARING", "READY_FOR_HANDOVER", "HANDED_OVER", "CANCELLED"],
+  PREPARING: ["READY_FOR_HANDOVER", "HANDED_OVER", "SHIPPING", "CANCELLED"],
   SHIPPING: ["DELIVERED"],
   DELIVERED: ["RETURNING"],
   RETURNING: ["RETURNED"],
@@ -115,6 +119,7 @@ const shippingAddressSchema = new mongoose.Schema(
 const shippingDetailsSchema = new mongoose.Schema(
   {
     carrier: { type: String, trim: true, default: "" },
+    carrierName: { type: String, trim: true, default: "" },
     trackingCode: { type: String, trim: true, default: "" },
     shippedAt: { type: Date, default: null },
     deliveredAt: { type: Date, default: null },

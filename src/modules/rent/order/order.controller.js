@@ -7,6 +7,7 @@ import {
   cancelOrder,
   approveOrder,
   rejectOrder,
+  handoverOrder,
 } from "./order.service.js";
 import { successResponse } from "../../../utils/response.js";
 
@@ -97,6 +98,24 @@ const rejectOrderController = async (req, res, next) => {
   }
 };
 
+const handoverOrderController = async (req, res, next) => {
+  try {
+    const order = await handoverOrder(req.params.id, req.user, {
+      carrierName: req.body.carrierName,
+      trackingCode: req.body.trackingCode,
+      status: req.body.status,
+    });
+
+    return successResponse(
+      res,
+      "Order handover information updated successfully",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -106,4 +125,5 @@ export {
   cancelOrderController,
   approveOrderController,
   rejectOrderController,
+  handoverOrderController,
 };

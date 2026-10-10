@@ -369,6 +369,65 @@ const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
   return order;
 };
 
+/**
+ * [BE-S3-06] Cập nhật trạng thái giao hàng / bàn giao (Shop Owner)
+ * Chỉ order PAID mới được chuyển sang READY_FOR_HANDOVER hoặc HANDED_OVER
+ */
+const handoverOrder = async (
+  orderId,
+  user,
+  { carrierName, trackingCode, status = RENTAL_ORDER_STATUS.HANDED_OVER } = {}
+) => {
+  assertValidOrderId(orderId);
+
+  if (user.role !== "SHOP_OWNER") {
+    throw createError("Chỉ Shop Owner mới có quyền cập nhật trạng thái bàn giao", 403, "FORBIDDEN");
+  }
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Order not found", 404, "ORDER_NOT_FOUND");
+  }
+
+  if (order.shopOwnerId.toString() !== user._id.toString()) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
+  }
+
+  // AC: Không cho cập nhật order chưa thanh toán
+  const validCurrentStatuses = [
+    RENTAL_ORDER_STATUS.PAID,
+    RENTAL_ORDER_STATUS.READY_FOR_HANDOVER,
+  ];
+
+  if (!validCurrentStatuses.includes(order.status)) {
+    throw createError(
+      `Chỉ đơn hàng đã thanh toán (PAID) mới có thể bàn giao vận chuyển (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_NOT_PAID"
+    );
+  }
+
+  const targetStatus =
+    status === RENTAL_ORDER_STATUS.READY_FOR_HANDOVER
+      ? RENTAL_ORDER_STATUS.READY_FOR_HANDOVER
+      : RENTAL_ORDER_STATUS.HANDED_OVER;
+
+  // AC: Lưu carrier/tracking code ở cấp order
+  order.shippingDetails = {
+    ...(order.shippingDetails?.toObject ? order.shippingDetails.toObject() : order.shippingDetails),
+    carrier: carrierName.trim(),
+    carrierName: carrierName.trim(),
+    trackingCode: trackingCode.trim(),
+    shippedAt: order.shippingDetails?.shippedAt || new Date(),
+  };
+
+  // AC: order chuyển đúng trạng thái
+  order.status = targetStatus;
+  await order.save();
+
+  return order;
+};
+
 export {
   createOrder,
   getUserOrders,
@@ -378,4 +437,5 @@ export {
   cancelOrder,
   approveOrder,
   rejectOrder,
+  handoverOrder,
 };

@@ -67,7 +67,33 @@ const validateUpdateOrderStatus = (req, res, next) => {
   next();
 };
 
+const validateHandoverOrder = (req, res, next) => {
+  const { carrierName, trackingCode, status } = req.body;
+
+  if (!carrierName || typeof carrierName !== "string" || !carrierName.trim()) {
+    return fail(next, "carrierName là bắt buộc", "CARRIER_NAME_REQUIRED");
+  }
+
+  if (!trackingCode || typeof trackingCode !== "string" || !trackingCode.trim()) {
+    return fail(next, "trackingCode là bắt buộc", "TRACKING_CODE_REQUIRED");
+  }
+
+  if (
+    status !== undefined &&
+    !["READY_FOR_HANDOVER", "HANDED_OVER"].includes(status)
+  ) {
+    return fail(
+      next,
+      "status bàn giao chỉ nhận: READY_FOR_HANDOVER hoặc HANDED_OVER",
+      "INVALID_HANDOVER_STATUS"
+    );
+  }
+
+  next();
+};
+
 export {
   validateCreateOrder,
   validateUpdateOrderStatus,
+  validateHandoverOrder,
 };
