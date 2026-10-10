@@ -5,17 +5,18 @@ import {
   getAllOrders,
   updateOrderStatus,
   cancelOrder,
+  approveOrder,
+  rejectOrder,
 } from "./order.service.js";
 import { successResponse } from "../../../utils/response.js";
 
 const createOrderController = async (req, res, next) => {
   try {
     const order = await createOrder({
-      userId: req.user._id,
-      items: req.body.items,
+      user: req.user,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
       shippingAddress: req.body.shippingAddress,
-      paymentMethod: req.body.paymentMethod,
-      note: req.body.note,
     });
 
     return successResponse(res, "Order created successfully", order, 201);
@@ -46,7 +47,7 @@ const getOrderByIdController = async (req, res, next) => {
 
 const getAllOrdersController = async (req, res, next) => {
   try {
-    const result = await getAllOrders(req.query);
+    const result = await getAllOrders(req.user, req.query);
 
     return successResponse(res, "Shop orders retrieved successfully", result);
   } catch (error) {
@@ -56,7 +57,7 @@ const getAllOrdersController = async (req, res, next) => {
 
 const updateOrderStatusController = async (req, res, next) => {
   try {
-    const order = await updateOrderStatus(req.params.id, req.body.orderStatus);
+    const order = await updateOrderStatus(req.params.id, req.body.status, req.user);
 
     return successResponse(res, "Order status updated successfully", order);
   } catch (error) {
@@ -74,6 +75,28 @@ const cancelOrderController = async (req, res, next) => {
   }
 };
 
+const approveOrderController = async (req, res, next) => {
+  try {
+    const order = await approveOrder(req.params.id, req.user);
+
+    return successResponse(res, "Order approved successfully. Waiting for payment.", order);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const rejectOrderController = async (req, res, next) => {
+  try {
+    const order = await rejectOrder(req.params.id, req.user, {
+      reason: req.body?.reason,
+    });
+
+    return successResponse(res, "Order rejected successfully", order);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -81,4 +104,6 @@ export {
   getAllOrdersController,
   updateOrderStatusController,
   cancelOrderController,
+  approveOrderController,
+  rejectOrderController,
 };

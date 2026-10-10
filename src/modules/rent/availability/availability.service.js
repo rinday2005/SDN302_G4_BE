@@ -1,5 +1,5 @@
 import RentalProduct from "../product/rentalProduct.model.js";
-import RentalOrder from "../order/rentalOrder.model.js";
+import RentalOrder from "../order/order.model.js";
 import { isDateOverlap } from "./availability.utils.js";
 
 /**

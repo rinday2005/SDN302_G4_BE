@@ -10,6 +10,8 @@ import {
   adminCategoryRouter,
 } from "../modules/category/category.route.js";
 import orderRoutes from "../modules/rent/order/order.route.js";
+// NOTE [BE-S3-02]: Cart APIs (add/remove/update quantity/get)
+import cartRoutes from "../modules/cart/cart.route.js";
 import paymentRoutes from "../modules/payment/payment.route.js";
 import productRoutes from "../modules/rent/product/product.route.js";
 import uploadRoutes from "./upload.routes.js";
@@ -26,7 +28,9 @@ router.use("/api/auth", authRoutes);
 router.use("/api/categories", publicCategoryRouter);
 router.use("/api/admin/categories", adminCategoryRouter);
 router.use("/api/products", productRoutes);
-router.use("/api/orders", orderRoutes);
+// NOTE [BE-S3-02]: Rental order APIs moved from /api/orders to /api/rent/orders
+router.use("/api/rent/orders", orderRoutes);
+router.use("/api/cart", cartRoutes);
 router.use("/api/payments", paymentRoutes);
 router.use("/api", uploadRoutes);
 

@@ -1,80 +1,79 @@
 import mongoose from "mongoose";
 
-const orderItemSchema = new mongoose.Schema(
+/**
+ * Vòng đời đơn thuê (RentalOrder lifecycle)
+ *
+ * PENDING ──► CONFIRMED ──► PREPARING ──► SHIPPING ──► DELIVERED ──► RETURNING ──► RETURNED ──► COMPLETED
+ *    │            │             │
+ *    ├──► REJECTED │             │
+ *    └──► CANCELLED ◄────────────┘
+ */
+export const RENTAL_ORDER_STATUS = Object.freeze({
+  PENDING: "PENDING", // Renter vừa đặt, chờ Shop Owner duyệt
+  WAITING_PAYMENT: "WAITING_PAYMENT", // Shop Owner đã duyệt, chờ thanh toán
+  CONFIRMED: "CONFIRMED", // Đã xác nhận / thanh toán
+  REJECTED: "REJECTED", // Shop Owner từ chối đơn
+  PREPARING: "PREPARING", // Shop đang chuẩn bị hàng
+  SHIPPING: "SHIPPING", // Đang giao hàng tới Renter
+  DELIVERED: "DELIVERED", // Renter đã nhận hàng (đang trong thời gian thuê)
+  RETURNING: "RETURNING", // Renter đang gửi trả hàng
+  RETURNED: "RETURNED", // Shop đã nhận lại hàng, chờ kiểm tra / hoàn cọc
+  COMPLETED: "COMPLETED", // Hoàn tất đơn thuê
+  CANCELLED: "CANCELLED", // Đơn bị hủy
+});
+
+// Các bước chuyển trạng thái hợp lệ
+export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
+  PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
+  WAITING_PAYMENT: ["CONFIRMED", "PREPARING", "CANCELLED"],
+  CONFIRMED: ["PREPARING", "CANCELLED"],
+  PREPARING: ["SHIPPING", "CANCELLED"],
+  SHIPPING: ["DELIVERED"],
+  DELIVERED: ["RETURNING"],
+  RETURNING: ["RETURNED"],
+  RETURNED: ["COMPLETED"],
+  REJECTED: [],
+  COMPLETED: [],
+  CANCELLED: [],
+});
+
+export const canTransitionStatus = (from, to) =>
+  (RENTAL_ORDER_STATUS_TRANSITIONS[from] || []).includes(to);
+
+// Snapshot sản phẩm tại thời điểm đặt thuê
+const rentalOrderItemSchema = new mongoose.Schema(
   {
-    product: {
+    productId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Product",
-      default: null,
+      ref: "RentalProduct",
+      required: [true, "productId là bắt buộc"],
     },
     productName: {
       type: String,
-      required: [true, "Product name is required"],
+      required: [true, "productName là bắt buộc"],
       trim: true,
-    },
-    productImage: {
-      type: String,
-      default: "",
-    },
-    orderType: {
-      type: String,
-      enum: ["RENT", "THRIFT"],
-      default: "RENT",
-      required: true,
     },
     quantity: {
       type: Number,
-      required: true,
-      min: [1, "Quantity must be at least 1"],
-      default: 1,
+      required: [true, "quantity là bắt buộc"],
+      min: [1, "quantity phải từ 1 trở lên"],
     },
-    size: {
-      type: String,
-      default: "FreeSize",
-    },
-    // Dành cho đồ thuê (RENT)
-    rentalStartDate: {
-      type: Date,
-      default: null,
-    },
-    rentalEndDate: {
-      type: Date,
-      default: null,
-    },
-    rentalDays: {
+    pricePerDay: {
       type: Number,
-      default: 1,
-      min: 1,
+      required: [true, "pricePerDay là bắt buộc"],
+      min: [0, "pricePerDay phải lớn hơn hoặc bằng 0"],
     },
-    // Đơn giá: giá thuê theo ngày (RENT) hoặc giá bán (THRIFT)
-    price: {
+    depositAmount: {
       type: Number,
-      required: true,
-      min: 0,
-    },
-    // Tiền cọc trên 1 sản phẩm thuê (đối với THRIFT thì = 0)
-    deposit: {
-      type: Number,
+      required: [true, "depositAmount là bắt buộc"],
+      min: [0, "depositAmount phải lớn hơn hoặc bằng 0"],
       default: 0,
-      min: 0,
-    },
-    // Tổng tiền thuê/mua cho món đồ này = (price * rentalDays * quantity) hoặc (price * quantity)
-    itemSubtotal: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    // Tổng tiền cọc cho món đồ này = deposit * quantity
-    itemDeposit: {
-      type: Number,
-      default: 0,
-      min: 0,
     },
   },
-  { _id: true }
+  { _id: false }
 );
 
-const orderAddressSchema = new mongoose.Schema(
+const shippingAddressSchema = new mongoose.Schema(
   {
     recipientName: {
       type: String,
@@ -110,93 +109,133 @@ const orderAddressSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const orderSchema = new mongoose.Schema(
+// Thông tin vận chuyển (giao đi & trả về)
+const shippingDetailsSchema = new mongoose.Schema(
+  {
+    carrier: { type: String, trim: true, default: "" },
+    trackingCode: { type: String, trim: true, default: "" },
+    shippedAt: { type: Date, default: null },
+    deliveredAt: { type: Date, default: null },
+    returnCarrier: { type: String, trim: true, default: "" },
+    returnTrackingCode: { type: String, trim: true, default: "" },
+    returnShippedAt: { type: Date, default: null },
+    returnedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const rentalOrderSchema = new mongoose.Schema(
   {
     orderCode: {
       type: String,
-      required: true,
+      required: [true, "orderCode là bắt buộc"],
       unique: true,
       trim: true,
     },
-    user: {
+    renterId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: [true, "renterId là bắt buộc"],
+      index: true,
     },
-    // Danh sách nhiều món đồ trong 1 đơn hàng (Multi-item order)
-    items: {
-      type: [orderItemSchema],
-      required: true,
+    // AC: shopOwnerId luôn là Shop Owner duy nhất
+    shopOwnerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "shopOwnerId là bắt buộc"],
+      index: true,
       validate: {
-        validator: function (items) {
-          return Array.isArray(items) && items.length > 0;
+        validator: async function (value) {
+          if (!value) return false;
+          const User = mongoose.model("User");
+          const user = await User.findById(value).select("role");
+          return !!user && user.role === "SHOP_OWNER";
         },
-        message: "Order must contain at least one item",
+        message: "shopOwnerId không hợp lệ hoặc tài khoản không có quyền SHOP_OWNER",
       },
     },
-    shippingAddress: {
-      type: orderAddressSchema,
-      required: true,
+    // AC: một RentalOrder có thể chứa nhiều sản phẩm RENT
+    items: {
+      type: [rentalOrderItemSchema],
+      validate: {
+        validator: (items) => Array.isArray(items) && items.length > 0,
+        message: "RentalOrder phải có ít nhất 1 sản phẩm",
+      },
     },
-    // Tổng tiền thuê/mua của tất cả các món đồ
-    subtotal: {
+    startDate: {
+      type: Date,
+      required: [true, "startDate là bắt buộc"],
+    },
+    endDate: {
+      type: Date,
+      required: [true, "endDate là bắt buộc"],
+      validate: {
+        validator: function (value) {
+          return !this.startDate || value >= this.startDate;
+        },
+        message: "endDate phải sau hoặc bằng startDate",
+      },
+    },
+    // Tổng tiền thuê = Σ(pricePerDay * quantity * rentalDays)
+    rentalFee: {
       type: Number,
       required: true,
       min: 0,
     },
-    // Tổng tiền cọc của tất cả các món đồ thuê
-    totalDeposit: {
+    // Tổng tiền cọc = Σ(depositAmount * quantity)
+    depositAmount: {
       type: Number,
+      required: true,
+      min: 0,
       default: 0,
-      min: 0,
     },
-    // Phí vận chuyển
     shippingFee: {
       type: Number,
-      default: 0,
+      required: true,
       min: 0,
+      default: 0,
     },
-    // Tổng số tiền thanh toán 1 lần cho đơn hàng: subtotal + totalDeposit + shippingFee
+    // totalAmount = rentalFee + depositAmount + shippingFee
     totalAmount: {
       type: Number,
       required: true,
       min: 0,
     },
-    paymentMethod: {
-      type: String,
-      enum: ["COD", "VNPAY", "MOMO", "BANK_TRANSFER"],
-      default: "COD",
+    shippingAddress: {
+      type: shippingAddressSchema,
+      required: [true, "shippingAddress là bắt buộc"],
     },
-    paymentStatus: {
+    status: {
       type: String,
-      enum: ["PENDING", "PAID", "FAILED", "REFUNDED"],
-      default: "PENDING",
+      enum: {
+        values: Object.values(RENTAL_ORDER_STATUS),
+        message: "status không hợp lệ",
+      },
+      default: RENTAL_ORDER_STATUS.PENDING,
+      index: true,
     },
-    orderStatus: {
+    rejectionReason: {
       type: String,
-      enum: [
-        "PENDING",
-        "CONFIRMED",
-        "PREPARING",
-        "SHIPPING",
-        "DELIVERED",
-        "COMPLETED",
-        "CANCELLED",
-      ],
-      default: "PENDING",
-    },
-    note: {
-      type: String,
-      default: "",
       trim: true,
+      default: "",
+    },
+    shippingDetails: {
+      type: shippingDetailsSchema,
+      default: () => ({}),
     },
   },
   {
     timestamps: true,
-    collection: "orders",
+    collection: "rentalOrders",
   }
 );
 
-const Order = mongoose.model("Order", orderSchema);
+rentalOrderSchema.index({ renterId: 1, status: 1, createdAt: -1 });
+rentalOrderSchema.index({ shopOwnerId: 1, status: 1, createdAt: -1 });
+rentalOrderSchema.index({ "items.productId": 1, status: 1, startDate: 1, endDate: 1 });
 
-export default Order;
+const RentalOrder =
+  mongoose.models.RentalOrder || mongoose.model("RentalOrder", rentalOrderSchema);
+
+export { RentalOrder };
+export default RentalOrder;
