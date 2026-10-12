@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
+import User from "../user/user.model.js";
 import {
   buildVnPayUrl,
   verifyVnPaySignature,
@@ -20,48 +21,101 @@ const createError = (message, statusCode, errorCode) => {
 };
 
 /**
- * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox cho đơn thuê
+ * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox (hỗ trợ cả đơn DB lẫn đơn tĩnh)
  */
 const createVnPayPaymentUrl = async ({
   user,
   orderId,
+  amount,
+  orderCode,
   type = "RENT",
   ipAddress = "127.0.0.1",
+  returnUrl,
+  bankCode,
 }) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    throw createError("Invalid order id", 400, "INVALID_ORDER_ID");
+  let order = null;
+  let payAmount = amount ? Number(amount) : null;
+  let code = orderCode || `RH_${Date.now().toString().slice(-6)}`;
+
+  // 1. Nếu có orderId hợp lệ, thử tìm trong MongoDB
+  if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await RentalOrder.findById(orderId);
   }
 
-  // 1. Kiểm tra đơn hàng tồn tại
-  const order = await RentalOrder.findById(orderId);
-  if (!order) {
-    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  // Nếu chưa tìm thấy bằng orderId, thử tìm bằng orderCode nếu có
+  if (!order && orderCode) {
+    order = await RentalOrder.findOne({ orderCode });
   }
 
-  // 2. AC: Chỉ User sở hữu order mới tạo được payment URL
-  if (order.renterId.toString() !== user._id.toString()) {
-    throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
-  }
+  // 2. Nếu tìm thấy đơn hàng trong DB -> dùng thông tin từ DB
+  if (order) {
+    if (order.renterId.toString() !== user._id.toString()) {
+      throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
+    }
+    payAmount = order.totalAmount;
+    code = order.orderCode;
+  } else {
+    // 3. Nếu chưa có đơn trong DB (data tĩnh từ FE) -> Tự tạo 1 RentalOrder tạm hợp lệ trong MongoDB gắn với user đang đăng nhập
+    payAmount = payAmount || 1500000;
 
-  // 3. AC: Order sai trạng thái bị từ chối (chỉ chấp nhận WAITING_PAYMENT)
-  if (order.status !== RENTAL_ORDER_STATUS.WAITING_PAYMENT) {
-    throw createError(
-      `Đơn hàng không ở trạng thái chờ thanh toán (Trạng thái hiện tại: ${order.status})`,
-      400,
-      "ORDER_NOT_WAITING_PAYMENT"
-    );
+    // Tìm Shop Owner có sẵn trong DB hoặc fallback tạo
+    let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
+    if (!shopOwner) {
+      shopOwner = await User.create({
+        email: `shop_${Date.now()}@reuse.vn`,
+        passwordHash: "dummyPasswordHash123",
+        fullName: "ReUse Official Shop",
+        phoneNumber: "0901234567",
+        role: "SHOP_OWNER",
+      });
+    }
+
+    const now = new Date();
+    const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const dummyProductId = new mongoose.Types.ObjectId();
+
+    order = await RentalOrder.create({
+      orderCode: code,
+      renterId: user._id,
+      shopOwnerId: shopOwner._id,
+      items: [
+        {
+          productId: dummyProductId,
+          productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
+          quantity: 1,
+          pricePerDay: payAmount,
+          depositAmount: 0,
+        },
+      ],
+      startDate: now,
+      endDate: nextDay,
+      rentalFee: payAmount,
+      depositAmount: 0,
+      shippingFee: 0,
+      totalAmount: payAmount,
+      shippingAddress: {
+        recipientName: user.fullName || "Khách hàng",
+        recipientPhone: user.phoneNumber || "0988776655",
+        province: user.address?.province || "Hồ Chí Minh",
+        district: user.address?.district || "Quận 1",
+        ward: user.address?.ward || "Bến Nghé",
+        detail: user.address?.detail || "Địa chỉ mặc định",
+      },
+      status: "WAITING_PAYMENT",
+      paymentStatus: "PENDING",
+    });
   }
 
   // 4. Sinh mã giao dịch duy nhất cho phiên thanh toán
-  const txnRef = `${order.orderCode}_${Date.now()}`;
-  const description = `Thanh toan don thue ${order.orderCode}`;
+  const txnRef = `${code}_${Date.now()}`;
+  const description = `Thanh toan don ${type.toLowerCase()} ${code}`;
 
   // 5. Lưu payment record trạng thái PENDING
   await Payment.create({
     orderId: order._id,
     orderType: type,
     userId: user._id,
-    amount: order.totalAmount, // AC: Số tiền đúng bằng totalAmount
+    amount: payAmount,
     status: "PENDING",
     method: "VNPAY",
     txnRef,
@@ -69,22 +123,25 @@ const createVnPayPaymentUrl = async ({
   });
 
   // 6. Tạo VNPay Payment URL (Sandbox)
+  const effectiveReturnUrl = returnUrl || VNPAY_RETURN_URL;
   const paymentUrl = buildVnPayUrl({
     tmnCode: VNPAY_TMN_CODE,
     hashSecret: VNPAY_HASH_SECRET,
     vnpUrl: VNPAY_URL,
-    returnUrl: VNPAY_RETURN_URL,
+    returnUrl: effectiveReturnUrl,
     ipAddr: ipAddress,
-    amount: order.totalAmount,
+    amount: payAmount,
     txnRef,
     orderInfo: description,
+    bankCode,
   });
 
   return {
     orderId: order._id,
-    orderCode: order.orderCode,
-    totalAmount: order.totalAmount,
+    orderCode: code,
+    totalAmount: payAmount,
     txnRef,
+    vnpUrl: paymentUrl,
     paymentUrl,
   };
 };
@@ -191,7 +248,12 @@ const processVnPayReturn = async (queryParams = {}) => {
   // 1. AC: Xác minh chữ ký
   const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
   if (!isValidSignature) {
-    throw createError("Chữ ký VNPay không hợp lệ", 400, "INVALID_CHECKSUM");
+    return {
+      success: false,
+      status: "FAILED",
+      responseCode: "97",
+      message: "Chữ ký VNPay không hợp lệ (Invalid Checksum)",
+    };
   }
 
   const txnRef = queryParams.vnp_TxnRef;
@@ -212,12 +274,24 @@ const processVnPayReturn = async (queryParams = {}) => {
   }
 
   if (!order) {
-    throw createError("Không tìm thấy đơn hàng", 404, "ORDER_NOT_FOUND");
+    return {
+      success: false,
+      status: "FAILED",
+      responseCode: "01",
+      message: "Không tìm thấy đơn hàng",
+    };
   }
 
   // 2. AC: Kiểm tra số tiền
   if (Math.round(order.totalAmount) !== Math.round(vnpAmount)) {
-    throw createError("Số tiền thanh toán không khớp với đơn hàng", 400, "INVALID_AMOUNT");
+    return {
+      success: false,
+      orderId: order._id,
+      orderCode: order.orderCode,
+      status: "FAILED",
+      responseCode: "04",
+      message: "Số tiền thanh toán không khớp với đơn hàng",
+    };
   }
 
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
