@@ -72,6 +72,8 @@ router.use("/api/cart", cartRoutes);
 // PAYMENT
 // ======================================================
 router.use("/api/payments", paymentRoutes);
+router.use("/api/payment", paymentRoutes);
+router.use("/payments", paymentRoutes);
 
 // ======================================================
 // UPLOAD
