@@ -1,8 +1,27 @@
 import express from 'express';
 import * as productController from './product.controller.js';
 import authMiddleware from '../../../middleware/auth.middleware.js';
+import authorize from '../../../middleware/role.middleware.js';
+import { validateUpdateProductStatus } from './product.validation.js';
 
 const router = express.Router();
+const adminProductRouter = express.Router();
+
+// ======================================================
+// BE-S2-04
+// ADMIN ROUTE - Duyệt / Từ chối sản phẩm cho thuê
+// PATCH /api/admin/rent/products/:id/status
+// ======================================================
+adminProductRouter.use(
+  authMiddleware,
+  authorize(['ADMIN'])
+);
+
+adminProductRouter.patch(
+  '/:id/status',
+  validateUpdateProductStatus,
+  productController.updateProductStatus
+);
 
 // ======================================================
 // BE-S2-05
@@ -60,4 +79,5 @@ router.delete(
   productController.deleteProduct
 );
 
+export { adminProductRouter };
 export default router;

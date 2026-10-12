@@ -35,7 +35,7 @@ const seedCategories = async () => {
       category,
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
         setDefaultsOnInsert: true,
       }
     );
@@ -71,7 +71,7 @@ const seedUsers = async () => {
     shopOwnerData,
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       setDefaultsOnInsert: true,
     }
   );
@@ -89,7 +89,7 @@ const seedUsers = async () => {
     },
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       setDefaultsOnInsert: true,
     }
   );
@@ -113,7 +113,7 @@ const seedUsers = async () => {
     },
     {
       upsert: true,
-      new: true,
+      returnDocument: "after",
       setDefaultsOnInsert: true,
     }
   );
@@ -125,63 +125,76 @@ const seedProducts = async (categories) => {
   const partyCat = categories.find((c) => c.slug === "trang-phuc-da-hoi-su-kien") || categories[0];
   const accessoryCat = categories.find((c) => c.slug === "phu-kien") || categories[0];
 
+  const shopOwner = await User.findOne({ role: "SHOP_OWNER" });
+  if (!shopOwner) {
+    throw new Error("Shop Owner must be seeded before seeding products");
+  }
+
+  const defaultLocation = shopOwner.address?.detail
+    ? `${shopOwner.address.detail}, ${shopOwner.address.ward}, ${shopOwner.address.district}, ${shopOwner.address.province}`
+    : "123 Lê Lợi, Phường Bến Nghé, Quận 1, Hồ Chí Minh";
+
   const sampleProducts = [
     {
       name: "Áo dài cách tân gấm hoa mai",
-      slug: "ao-dai-cach-tan-gam-hoa-mai",
       description: "Áo dài truyền thống cách tân hiện đại, chất gấm mềm mịn thích hợp lễ tết, chụp ảnh.",
-      category: fashionCat._id,
-      type: "RENT",
+      categoryId: fashionCat._id,
+      ownerId: shopOwner._id,
       pricePerDay: 150000,
-      deposit: 300000,
-      stock: 5,
-      sizes: ["S", "M", "L"],
-      condition: "99%",
+      depositAmount: 300000,
+      totalQuantity: 5,
+      condition: "LIKE_NEW",
+      rentalRules: "Vui lòng giữ gìn cẩn thận, không làm rách hay dính vết bẩn khó tẩy.",
+      location: defaultLocation,
+      status: "APPROVED",
       images: [
         "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=600&q=80",
       ],
     },
     {
       name: "Đầm dạ hội đính đá cao cấp",
-      slug: "dam-da-hoi-dinh-da-cao-cap",
       description: "Đầm dạ hội đuôi cá quyến rũ, tôn dáng cho các buổi tiệc sang trọng.",
-      category: partyCat._id,
-      type: "RENT",
+      categoryId: partyCat._id,
+      ownerId: shopOwner._id,
       pricePerDay: 250000,
-      deposit: 500000,
-      stock: 3,
-      sizes: ["M", "L"],
-      condition: "Mới 100%",
+      depositAmount: 500000,
+      totalQuantity: 3,
+      condition: "NEW",
+      rentalRules: "Không giặt nhiệt độ cao, trả nguyên trạng ban đầu.",
+      location: defaultLocation,
+      status: "APPROVED",
       images: [
         "https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=600&q=80",
       ],
     },
     {
       name: "Bộ Vest nam công sở cao cấp",
-      slug: "bo-vest-nam-cong-so-cao-cap",
       description: "Bộ vest lịch lãm phong cách Hàn Quốc, vừa có thể thuê theo ngày vừa có thể mua thanh lý.",
-      category: fashionCat._id,
-      type: "BOTH",
+      categoryId: fashionCat._id,
+      ownerId: shopOwner._id,
       pricePerDay: 200000,
-      thriftPrice: 850000,
-      deposit: 400000,
-      stock: 4,
-      sizes: ["L", "XL"],
-      condition: "98%",
+      depositAmount: 400000,
+      totalQuantity: 4,
+      condition: "LIKE_NEW",
+      rentalRules: "Giữ form vest phẳng đẹp, không tự ý ủi nhiệt độ cao.",
+      location: defaultLocation,
+      status: "APPROVED",
       images: [
         "https://images.unsplash.com/photo-1594938298603-c8148c4dae35?auto=format&fit=crop&w=600&q=80",
       ],
     },
     {
-      name: "Túi xách da vintage thanh lý",
-      slug: "tui-xach-da-vintage-thanh-ly",
-      description: "Túi xách da phong cách cổ điển, phối đồ cực chất, bán thanh lý giá tốt.",
-      category: accessoryCat._id,
-      type: "THRIFT",
-      thriftPrice: 320000,
-      stock: 2,
-      sizes: ["FreeSize"],
-      condition: "95%",
+      name: "Túi xách da vintage cổ điển",
+      description: "Túi xách da phong cách cổ điển, phối đồ cực chất, thích hợp tiệc và chụp ảnh.",
+      categoryId: accessoryCat._id,
+      ownerId: shopOwner._id,
+      pricePerDay: 80000,
+      depositAmount: 320000,
+      totalQuantity: 2,
+      condition: "GOOD",
+      rentalRules: "Tránh tiếp xúc nước hoặc chất tẩy rửa mạnh.",
+      location: defaultLocation,
+      status: "APPROVED",
       images: [
         "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&w=600&q=80",
       ],
@@ -190,11 +203,11 @@ const seedProducts = async (categories) => {
 
   for (const item of sampleProducts) {
     await Product.findOneAndUpdate(
-      { slug: item.slug },
+      { name: item.name },
       item,
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
         setDefaultsOnInsert: true,
       }
     );

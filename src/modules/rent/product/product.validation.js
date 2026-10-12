@@ -68,7 +68,38 @@ const validateUpdateProduct = (req, res, next) => {
   next();
 };
 
+const validateUpdateProductStatus = (req, res, next) => {
+  const { id } = req.params;
+  const { status, reason } = req.body;
+
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    const error = new Error("ID sản phẩm không hợp lệ");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_PRODUCT_ID";
+    return next(error);
+  }
+
+  if (!status || !["APPROVED", "REJECTED"].includes(status)) {
+    const error = new Error(
+      "Trạng thái duyệt không hợp lệ. Trạng thái hợp lệ: APPROVED, REJECTED"
+    );
+    error.statusCode = 400;
+    error.errorCode = "INVALID_STATUS";
+    return next(error);
+  }
+
+  if (reason !== undefined && typeof reason !== "string") {
+    const error = new Error("Lý do từ chối phải là chuỗi văn bản");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_REASON";
+    return next(error);
+  }
+
+  next();
+};
+
 export {
   validateCreateProduct,
   validateUpdateProduct,
+  validateUpdateProductStatus,
 };
