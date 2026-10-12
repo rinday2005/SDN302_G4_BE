@@ -19,6 +19,7 @@ import cartRoutes from "../modules/cart/cart.route.js";
 import paymentRoutes from "../modules/payment/payment.route.js";
 import productRoutes from "../modules/rent/product/product.route.js";
 import uploadRoutes from "./upload.routes.js";
+import userRoutes from "../modules/user/user.route.js";
 
 const router = Router();
 
@@ -76,5 +77,12 @@ router.use("/api/payments", paymentRoutes);
 // UPLOAD
 // ======================================================
 router.use("/api", uploadRoutes);
+router.use("/upload", uploadRoutes);
+
+// ======================================================
+// USER & PROFILE
+// ======================================================
+router.use("/api/users", userRoutes);
+router.use("/users", userRoutes);
 
 export default router;

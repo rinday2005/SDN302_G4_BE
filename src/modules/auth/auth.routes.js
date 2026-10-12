@@ -7,6 +7,8 @@ import {
   getShopOwnerStatusController,
 } from "./auth.controller.js";
 import { validateRegister, validateLogin } from "./auth.validation.js";
+import authMiddleware from "../../middleware/auth.middleware.js";
+import { getProfileController } from "../user/user.controller.js";
 
 const router = Router();
 
@@ -21,5 +23,8 @@ router.post("/logout", logoutController);
 
 // GET /api/auth/shop-owner-status — kiểm tra có shop owner chưa
 router.get("/shop-owner-status", getShopOwnerStatusController);
+
+// GET /api/auth/me — lấy thông tin user hiện tại (bao gồm avatarUrl)
+router.get("/me", authMiddleware, getProfileController);
 
 export default router;
