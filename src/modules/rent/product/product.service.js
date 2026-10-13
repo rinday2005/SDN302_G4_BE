@@ -1,16 +1,119 @@
-import mongoose from 'mongoose';
-import RentalProduct from './product.model.js';
+import mongoose from "mongoose";
+import RentalProduct from "./product.model.js";
+import RentalOrder from "../order/order.model.js";
 
-// Escape ký tự đặc biệt trước khi dùng RegExp
-const escapeRegex = (value = '') => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const createError = (message, statusCode, errorCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.errorCode = errorCode;
+  return error;
 };
 
-// ======================================================
-// BE-S2-05 - PUBLIC SEARCH + PAGINATION
-// GET /api/rent/products
-// ======================================================
-export const getPublicProducts = async (query = {}) => {
+const escapeRegex = (value = "") =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Tạo sản phẩm cho thuê
+ */
+const createProduct = async (productData, ownerId) => {
+  const {
+    ownerId: ignoredOwnerId,
+    status: ignoredStatus,
+    ...safeData
+  } = productData;
+
+  const product = await RentalProduct.create({
+    ...safeData,
+    ownerId,
+    status: "PENDING_APPROVAL",
+  });
+
+  return product;
+};
+
+/**
+ * Cập nhật sản phẩm cho thuê
+ */
+const updateProduct = async (productId, ownerId, updateData) => {
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw createError(
+      "Product id không hợp lệ",
+      400,
+      "INVALID_PRODUCT_ID"
+    );
+  }
+
+  const product = await RentalProduct.findById(productId);
+
+  if (!product) {
+    throw createError(
+      "Không tìm thấy sản phẩm",
+      404,
+      "PRODUCT_NOT_FOUND"
+    );
+  }
+
+  if (product.ownerId.toString() !== ownerId.toString()) {
+    throw createError(
+      "Bạn không có quyền cập nhật sản phẩm này",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  const {
+    ownerId: ignoredOwnerId,
+    status: ignoredStatus,
+    ...safeUpdateData
+  } = updateData;
+
+  Object.assign(product, safeUpdateData);
+
+  await product.save();
+
+  return product;
+};
+
+/**
+ * Xóa sản phẩm cho thuê
+ */
+const deleteProduct = async (productId, ownerId) => {
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw createError(
+      "Product id không hợp lệ",
+      400,
+      "INVALID_PRODUCT_ID"
+    );
+  }
+
+  const product = await RentalProduct.findById(productId);
+
+  if (!product) {
+    throw createError(
+      "Không tìm thấy sản phẩm",
+      404,
+      "PRODUCT_NOT_FOUND"
+    );
+  }
+
+  if (product.ownerId.toString() !== ownerId.toString()) {
+    throw createError(
+      "Bạn không có quyền xóa sản phẩm này",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  await product.deleteOne();
+
+  return product;
+};
+
+/**
+ * [BE-S2-05]
+ * Public search + filter + pagination Rental Products
+ */
+const getPublicProducts = async (query = {}) => {
   const {
     keyword,
     categoryId,
@@ -19,21 +122,13 @@ export const getPublicProducts = async (query = {}) => {
     province,
     page = 1,
     limit = 12,
-    sortBy = 'newest',
+    sortBy = "newest",
   } = query;
 
-  const currentPage = Math.max(parseInt(page, 10) || 1, 1);
-  const currentLimit = Math.min(
-    Math.max(parseInt(limit, 10) || 12, 1),
-    100
-  );
-
   const filter = {
-    // RentalProduct collection chỉ chứa sản phẩm RENT
-    status: 'APPROVED',
+    status: "APPROVED",
   };
 
-  // Search không phân biệt hoa thường
   if (keyword?.trim()) {
     const safeKeyword = escapeRegex(keyword.trim());
 
@@ -41,122 +136,138 @@ export const getPublicProducts = async (query = {}) => {
       {
         name: {
           $regex: safeKeyword,
-          $options: 'i',
+          $options: "i",
         },
       },
       {
         description: {
           $regex: safeKeyword,
-          $options: 'i',
+          $options: "i",
         },
       },
     ];
   }
 
-  // Category
   if (categoryId) {
     if (!mongoose.Types.ObjectId.isValid(categoryId)) {
-      const error = new Error('categoryId không hợp lệ');
-      error.statusCode = 400;
-      error.errorCode = 'INVALID_CATEGORY_ID';
-      throw error;
+      throw createError(
+        "categoryId không hợp lệ",
+        400,
+        "INVALID_CATEGORY_ID"
+      );
     }
 
     filter.categoryId = categoryId;
   }
 
-  // Giá thuê
-  if (minPrice !== undefined || maxPrice !== undefined) {
+  const parsedMinPrice =
+    minPrice !== undefined && minPrice !== ""
+      ? Number(minPrice)
+      : null;
+
+  const parsedMaxPrice =
+    maxPrice !== undefined && maxPrice !== ""
+      ? Number(maxPrice)
+      : null;
+
+  if (
+    parsedMinPrice !== null &&
+    (Number.isNaN(parsedMinPrice) || parsedMinPrice < 0)
+  ) {
+    throw createError(
+      "minPrice không hợp lệ",
+      400,
+      "INVALID_MIN_PRICE"
+    );
+  }
+
+  if (
+    parsedMaxPrice !== null &&
+    (Number.isNaN(parsedMaxPrice) || parsedMaxPrice < 0)
+  ) {
+    throw createError(
+      "maxPrice không hợp lệ",
+      400,
+      "INVALID_MAX_PRICE"
+    );
+  }
+
+  if (
+    parsedMinPrice !== null &&
+    parsedMaxPrice !== null &&
+    parsedMinPrice > parsedMaxPrice
+  ) {
+    throw createError(
+      "minPrice không được lớn hơn maxPrice",
+      400,
+      "INVALID_PRICE_RANGE"
+    );
+  }
+
+  if (parsedMinPrice !== null || parsedMaxPrice !== null) {
     filter.pricePerDay = {};
 
-    if (minPrice !== undefined && minPrice !== '') {
-      const parsedMin = Number(minPrice);
-
-      if (Number.isNaN(parsedMin) || parsedMin < 0) {
-        const error = new Error('minPrice không hợp lệ');
-        error.statusCode = 400;
-        error.errorCode = 'INVALID_MIN_PRICE';
-        throw error;
-      }
-
-      filter.pricePerDay.$gte = parsedMin;
+    if (parsedMinPrice !== null) {
+      filter.pricePerDay.$gte = parsedMinPrice;
     }
 
-    if (maxPrice !== undefined && maxPrice !== '') {
-      const parsedMax = Number(maxPrice);
-
-      if (Number.isNaN(parsedMax) || parsedMax < 0) {
-        const error = new Error('maxPrice không hợp lệ');
-        error.statusCode = 400;
-        error.errorCode = 'INVALID_MAX_PRICE';
-        throw error;
-      }
-
-      filter.pricePerDay.$lte = parsedMax;
-    }
-
-    if (
-      minPrice !== undefined &&
-      minPrice !== '' &&
-      maxPrice !== undefined &&
-      maxPrice !== '' &&
-      Number(minPrice) > Number(maxPrice)
-    ) {
-      const error = new Error(
-        'minPrice không được lớn hơn maxPrice'
-      );
-      error.statusCode = 400;
-      error.errorCode = 'INVALID_PRICE_RANGE';
-      throw error;
+    if (parsedMaxPrice !== null) {
+      filter.pricePerDay.$lte = parsedMaxPrice;
     }
   }
 
-  // Schema hiện tại chỉ có location String,
-  // nên province được match trong location.
   if (province?.trim()) {
     filter.location = {
       $regex: escapeRegex(province.trim()),
-      $options: 'i',
+      $options: "i",
     };
   }
 
-  // Sorting
+  const parsedPage = Math.max(1, Number(page) || 1);
+
+  const parsedLimit = Math.min(
+    100,
+    Math.max(1, Number(limit) || 12)
+  );
+
+  const skip = (parsedPage - 1) * parsedLimit;
+
   let sort = {
     createdAt: -1,
   };
 
   switch (sortBy) {
-    case 'price_asc':
+    case "price_asc":
       sort = {
         pricePerDay: 1,
       };
       break;
 
-    case 'price_desc':
+    case "price_desc":
       sort = {
         pricePerDay: -1,
       };
       break;
 
-    case 'name_asc':
+    case "name_asc":
       sort = {
         name: 1,
       };
       break;
 
-    case 'name_desc':
+    case "name_desc":
       sort = {
         name: -1,
       };
       break;
 
-    case 'oldest':
+    case "oldest":
       sort = {
         createdAt: 1,
       };
       break;
 
-    case 'newest':
+    case "newest":
     default:
       sort = {
         createdAt: -1,
@@ -164,163 +275,272 @@ export const getPublicProducts = async (query = {}) => {
       break;
   }
 
-  const skip = (currentPage - 1) * currentLimit;
-
   const [products, total] = await Promise.all([
     RentalProduct.find(filter)
       .populate(
-        'ownerId',
-        'fullName email phoneNumber address avatarUrl role'
+        "ownerId",
+        "fullName email phoneNumber address avatarUrl role"
       )
-      .populate('categoryId', 'name slug type')
+      .populate(
+        "categoryId",
+        "name slug type"
+      )
       .sort(sort)
       .skip(skip)
-      .limit(currentLimit)
+      .limit(parsedLimit)
       .lean(),
 
     RentalProduct.countDocuments(filter),
   ]);
 
-  const totalPages =
-    total === 0 ? 0 : Math.ceil(total / currentLimit);
-
   return {
     products,
+
     pagination: {
       total,
-      page: currentPage,
-      totalPages,
-      limit: currentLimit,
+      page: parsedPage,
+      totalPages: Math.ceil(total / parsedLimit),
+      limit: parsedLimit,
     },
   };
 };
 
-// ======================================================
-// EXISTING SHOP OWNER FUNCTIONS
-// ======================================================
+/**
+ * [BE-S2-06]
+ * Public product detail + busy calendar
+ */
+const getPublicProductDetail = async (productId) => {
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw createError(
+      "Sản phẩm không tồn tại",
+      404,
+      "PRODUCT_NOT_FOUND"
+    );
+  }
 
-export const createProduct = async (userId, data) => {
-  const { ownerId, status, ...allowedData } = data;
-
-  const product = new RentalProduct({
-    ...allowedData,
-    ownerId: userId,
-    status: 'PENDING_APPROVAL',
-  });
-
-  return await product.save();
-};
-
-export const updateProduct = async (
-  productId,
-  userId,
-  updateData
-) => {
-  const product = await RentalProduct.findById(productId);
+  const product = await RentalProduct.findOne({
+    _id: productId,
+    status: "APPROVED",
+  })
+    .populate(
+      "ownerId",
+      "fullName email phoneNumber address avatarUrl role"
+    )
+    .populate(
+      "categoryId",
+      "name slug type"
+    )
+    .lean();
 
   if (!product) {
-    const error = new Error('Sản phẩm không tồn tại');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  if (product.ownerId.toString() !== userId.toString()) {
-    const error = new Error(
-      'Bạn không có quyền chỉnh sửa sản phẩm này'
+    throw createError(
+      "Sản phẩm không tồn tại hoặc chưa được duyệt",
+      404,
+      "PRODUCT_NOT_FOUND"
     );
-    error.statusCode = 403;
-    throw error;
   }
 
-  const {
-    ownerId,
-    status,
-    ...validUpdates
-  } = updateData;
+  const activeOrders = await RentalOrder.find({
+    status: {
+      $nin: [
+        "REJECTED",
+        "CANCELLED",
+        "COMPLETED",
+      ],
+    },
 
-  Object.assign(product, validUpdates);
+    "items.productId": product._id,
+  })
+    .select(
+      "startDate endDate status items"
+    )
+    .lean();
 
-  return await product.save();
-};
+  const events = [];
 
-export const deleteProduct = async (
-  productId,
-  userId
-) => {
-  const product = await RentalProduct.findById(productId);
+  for (const order of activeOrders) {
+    let bookedQuantity = 0;
 
-  if (!product) {
-    const error = new Error('Sản phẩm không tồn tại');
-    error.statusCode = 404;
-    throw error;
+    for (const item of order.items || []) {
+      if (
+        item.productId &&
+        item.productId.toString() ===
+          product._id.toString()
+      ) {
+        bookedQuantity += Number(
+          item.quantity || 0
+        );
+      }
+    }
+
+    if (bookedQuantity <= 0) {
+      continue;
+    }
+
+    const startTime =
+      new Date(order.startDate).getTime();
+
+    const endTime =
+      new Date(order.endDate).getTime();
+
+    if (
+      Number.isNaN(startTime) ||
+      Number.isNaN(endTime) ||
+      startTime > endTime
+    ) {
+      continue;
+    }
+
+    events.push({
+      time: startTime,
+      delta: bookedQuantity,
+    });
+
+    events.push({
+      time: endTime + 1,
+      delta: -bookedQuantity,
+    });
   }
 
-  if (product.ownerId.toString() !== userId.toString()) {
-    const error = new Error(
-      'Bạn không có quyền xóa sản phẩm này'
+  const eventMap = new Map();
+
+  for (const event of events) {
+    eventMap.set(
+      event.time,
+      (eventMap.get(event.time) || 0) +
+        event.delta
     );
-    error.statusCode = 403;
-    throw error;
   }
 
-  await RentalProduct.findByIdAndDelete(productId);
+  const sortedEvents = [
+    ...eventMap.entries(),
+  ]
+    .map(([time, delta]) => ({
+      time: Number(time),
+      delta,
+    }))
+    .sort(
+      (first, second) =>
+        first.time - second.time
+    );
+
+  const busyCalendar = [];
+
+  let currentBookedQuantity = 0;
+
+  for (
+    let index = 0;
+    index < sortedEvents.length;
+    index += 1
+  ) {
+    const currentEvent =
+      sortedEvents[index];
+
+    currentBookedQuantity +=
+      currentEvent.delta;
+
+    const nextEvent =
+      sortedEvents[index + 1];
+
+    if (!nextEvent) {
+      continue;
+    }
+
+    const segmentStart =
+      currentEvent.time;
+
+    const segmentEnd =
+      nextEvent.time - 1;
+
+    if (segmentStart > segmentEnd) {
+      continue;
+    }
+
+    const availableQuantity =
+      Math.max(
+        0,
+        product.totalQuantity -
+          currentBookedQuantity
+      );
+
+    if (
+      currentBookedQuantity >=
+      product.totalQuantity
+    ) {
+      busyCalendar.push({
+        startDate:
+          new Date(segmentStart),
+
+        endDate:
+          new Date(segmentEnd),
+
+        bookedQuantity:
+          currentBookedQuantity,
+
+        availableQuantity,
+      });
+    }
+  }
+
+  const mergedBusyCalendar = [];
+
+  for (const period of busyCalendar) {
+    const previous =
+      mergedBusyCalendar[
+        mergedBusyCalendar.length - 1
+      ];
+
+    const isContinuous =
+      previous &&
+      new Date(
+        previous.endDate
+      ).getTime() +
+        1 ===
+        new Date(
+          period.startDate
+        ).getTime();
+
+    const sameBookedQuantity =
+      previous &&
+      previous.bookedQuantity ===
+        period.bookedQuantity;
+
+    const sameAvailableQuantity =
+      previous &&
+      previous.availableQuantity ===
+        period.availableQuantity;
+
+    if (
+      isContinuous &&
+      sameBookedQuantity &&
+      sameAvailableQuantity
+    ) {
+      previous.endDate =
+        period.endDate;
+    } else {
+      mergedBusyCalendar.push({
+        ...period,
+      });
+    }
+  }
 
   return {
-    message: 'Xóa sản phẩm thành công',
+    product,
+
+    availability: {
+      totalQuantity:
+        product.totalQuantity,
+
+      busyCalendar:
+        mergedBusyCalendar,
+    },
   };
 };
 
-// ======================================================
-// BE-S2-04 - ADMIN DUYỆT / TỪ CHỐI SẢN PHẨM CHO THUÊ
-// PATCH /api/admin/rent/products/:id/status
-// ======================================================
-export const updateProductStatus = async (
-  productId,
-  { status, reason = '' }
-) => {
-  if (!mongoose.Types.ObjectId.isValid(productId)) {
-    const error = new Error('ID sản phẩm không hợp lệ');
-    error.statusCode = 400;
-    error.errorCode = 'INVALID_PRODUCT_ID';
-    throw error;
-  }
-
-  if (!status || !['APPROVED', 'REJECTED'].includes(status)) {
-    const error = new Error(
-      'Trạng thái duyệt không hợp lệ. Trạng thái hợp lệ: APPROVED, REJECTED'
-    );
-    error.statusCode = 400;
-    error.errorCode = 'INVALID_STATUS';
-    throw error;
-  }
-
-  if (reason !== undefined && typeof reason !== 'string') {
-    const error = new Error('Lý do từ chối phải là chuỗi văn bản');
-    error.statusCode = 400;
-    error.errorCode = 'INVALID_REASON';
-    throw error;
-  }
-
-  const product = await RentalProduct.findById(productId);
-
-  if (!product) {
-    const error = new Error('Sản phẩm không tồn tại');
-    error.statusCode = 404;
-    error.errorCode = 'PRODUCT_NOT_FOUND';
-    throw error;
-  }
-
-  // AC: Chuyển PENDING_APPROVAL -> APPROVED / REJECTED
-  product.status = status;
-
-  if (status === 'REJECTED') {
-    const trimmedReason = reason ? reason.trim() : '';
-    product.rejectionReason = trimmedReason;
-    product.reason = trimmedReason;
-  } else if (status === 'APPROVED') {
-    product.rejectionReason = '';
-    product.reason = '';
-  }
-
-  return await product.save();
+export {
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  getPublicProducts,
+  getPublicProductDetail,
 };

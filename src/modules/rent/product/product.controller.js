@@ -1,49 +1,24 @@
-import * as productService from './product.service.js';
+import {
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  getPublicProducts,
+  getPublicProductDetail,
+} from "./product.service.js";
 
-// ======================================================
-// BE-S2-05
-// Public search & pagination
-// ======================================================
-export const getPublicProducts = async (
-  req,
-  res,
-  next
-) => {
+/**
+ * SHOP_OWNER tạo sản phẩm RENT
+ */
+const createProductController = async (req, res, next) => {
   try {
-    const result =
-      await productService.getPublicProducts(req.query);
-
-    return res.status(200).json({
-      success: true,
-      message:
-        'Lấy danh sách sản phẩm cho thuê thành công',
-      data: result.products,
-      pagination: result.pagination,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// ======================================================
-// Existing Shop Owner APIs
-// ======================================================
-export const createProduct = async (
-  req,
-  res,
-  next
-) => {
-  try {
-    const product =
-      await productService.createProduct(
-        req.user._id,
-        req.body
-      );
+    const product = await createProduct(
+      req.body,
+      req.user._id
+    );
 
     return res.status(201).json({
       success: true,
-      message:
-        'Tạo sản phẩm cho thuê thành công',
+      message: "Tạo sản phẩm cho thuê thành công",
       data: product,
     });
   } catch (error) {
@@ -51,79 +26,117 @@ export const createProduct = async (
   }
 };
 
-export const updateProduct = async (
-  req,
-  res,
-  next
-) => {
+/**
+ * SHOP_OWNER cập nhật sản phẩm RENT của mình
+ */
+const updateProductController = async (req, res, next) => {
   try {
-    const updated =
-      await productService.updateProduct(
-        req.params.id,
-        req.user._id,
-        req.body
-      );
+    const product = await updateProduct(
+      req.params.id,
+      req.user._id,
+      req.body
+    );
 
     return res.status(200).json({
       success: true,
-      message:
-        'Cập nhật sản phẩm thành công',
-      data: updated,
+      message: "Cập nhật sản phẩm cho thuê thành công",
+      data: product,
     });
   } catch (error) {
     next(error);
   }
 };
 
-export const deleteProduct = async (
+/**
+ * SHOP_OWNER xóa sản phẩm RENT của mình
+ */
+const deleteProductController = async (req, res, next) => {
+  try {
+    const product = await deleteProduct(
+      req.params.id,
+      req.user._id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Xóa sản phẩm cho thuê thành công",
+      data: product,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * [BE-S2-05]
+ * Public API:
+ * GET /api/rent/products
+ *
+ * Search + filter + sort + pagination
+ */
+const getPublicProductsController = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    const result = await getPublicProducts(
+      req.query
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Lấy danh sách sản phẩm cho thuê thành công",
+
+      data: result.products,
+
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * [BE-S2-06]
+ * Public API:
+ * GET /api/rent/products/:id
+ *
+ * Trả về:
+ * - chi tiết sản phẩm APPROVED
+ * - Shop Owner
+ * - Category
+ * - Availability Calendar
+ */
+const getPublicProductDetailController = async (
   req,
   res,
   next
 ) => {
   try {
     const result =
-      await productService.deleteProduct(
-        req.params.id,
-        req.user._id
+      await getPublicProductDetail(
+        req.params.id
       );
 
     return res.status(200).json({
       success: true,
-      message: result.message,
+
+      message:
+        "Lấy chi tiết sản phẩm cho thuê thành công",
+
+      data: result,
     });
   } catch (error) {
     next(error);
   }
 };
 
-// ======================================================
-// BE-S2-04
-// Admin duyệt / từ chối sản phẩm cho thuê
-// PATCH /api/admin/rent/products/:id/status
-// ======================================================
-export const updateProductStatus = async (
-  req,
-  res,
-  next
-) => {
-  try {
-    const { status, reason } = req.body;
-    const updatedProduct = await productService.updateProductStatus(
-      req.params.id,
-      { status, reason }
-    );
-
-    const message =
-      status === 'APPROVED'
-        ? 'Duyệt sản phẩm thành công'
-        : 'Từ chối sản phẩm thành công';
-
-    return res.status(200).json({
-      success: true,
-      message,
-      data: updatedProduct,
-    });
-  } catch (error) {
-    next(error);
-  }
+export {
+  createProductController,
+  updateProductController,
+  deleteProductController,
+  getPublicProductsController,
+  getPublicProductDetailController,
 };
