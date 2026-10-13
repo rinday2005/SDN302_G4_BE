@@ -17,8 +17,11 @@ import orderRoutes from "../modules/rent/order/order.route.js";
 import cartRoutes from "../modules/cart/cart.route.js";
 
 import paymentRoutes from "../modules/payment/payment.route.js";
-import productRoutes from "../modules/rent/product/product.route.js";
+import productRoutes, {
+  adminProductRouter,
+} from "../modules/rent/product/product.route.js";
 import uploadRoutes from "./upload.routes.js";
+import userRoutes from "../modules/user/user.route.js";
 
 const router = Router();
 
@@ -54,6 +57,11 @@ router.use("/api/products", productRoutes);
 // Existing /api/products route is preserved for backward compatibility.
 router.use("/api/rent/products", productRoutes);
 
+// NOTE [BE-S2-04]:
+// Register Admin RENT product APIs (approve / reject rental product status).
+router.use("/api/admin/rent/products", adminProductRouter);
+router.use("/api/admin/products", adminProductRouter);
+
 // ======================================================
 // RENT ORDER
 // ======================================================
@@ -71,10 +79,19 @@ router.use("/api/cart", cartRoutes);
 // PAYMENT
 // ======================================================
 router.use("/api/payments", paymentRoutes);
+router.use("/api/payment", paymentRoutes);
+router.use("/payments", paymentRoutes);
 
 // ======================================================
 // UPLOAD
 // ======================================================
 router.use("/api", uploadRoutes);
+router.use("/upload", uploadRoutes);
+
+// ======================================================
+// USER & PROFILE
+// ======================================================
+router.use("/api/users", userRoutes);
+router.use("/users", userRoutes);
 
 export default router;

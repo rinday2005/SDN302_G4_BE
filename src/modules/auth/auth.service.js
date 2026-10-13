@@ -87,9 +87,15 @@ const login = async ({ email, password }) => {
     accessToken,
     user: {
       id: user._id,
+      _id: user._id,
       email: user.email,
       fullName: user.fullName,
+      phoneNumber: user.phoneNumber || null,
+      phone: user.phoneNumber || null,
+      avatarUrl: user.avatarUrl || null,
       role: user.role,
+      kycStatus: user.kycStatus || null,
+      address: user.address || null,
     },
   };
 };

@@ -58,6 +58,7 @@ export const buildVnPayUrl = ({
   orderType = "billpayment",
   locale = "vn",
   currCode = "VND",
+  bankCode,
 }) => {
   const createDate = formatVnPayDate(new Date());
 
@@ -75,6 +76,10 @@ export const buildVnPayUrl = ({
     vnp_IpAddr: ipAddr === "::1" ? "127.0.0.1" : ipAddr,
     vnp_CreateDate: createDate,
   };
+
+  if (bankCode) {
+    vnpParams.vnp_BankCode = bankCode;
+  }
 
   const signData = buildVnPaySignData(vnpParams);
   const secureHash = createVnPaySignature(signData, hashSecret);
