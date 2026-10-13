@@ -87,6 +87,16 @@ const rentalProductSchema = new mongoose.Schema(
       default: 'PENDING_APPROVAL',
       index: true,
     },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    reason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     totalQuantity: {
       type: Number,
       required: [true, 'Số lượng sản phẩm là bắt buộc'],

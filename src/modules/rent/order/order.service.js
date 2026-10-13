@@ -189,8 +189,10 @@ const getOrderById = async (orderId, user) => {
   }
 
   const userId = user._id.toString();
-  const isRenter = order.renterId._id.toString() === userId;
-  const isShopOwner = order.shopOwnerId._id.toString() === userId;
+  const renterIdStr = (order.renterId?._id || order.renterId)?.toString();
+  const shopOwnerIdStr = (order.shopOwnerId?._id || order.shopOwnerId)?.toString();
+  const isRenter = renterIdStr === userId;
+  const isShopOwner = shopOwnerIdStr === userId;
   const isAdmin = user.role === "ADMIN";
 
   if (!isRenter && !isShopOwner && !isAdmin) {
@@ -241,7 +243,12 @@ const updateOrderStatus = async (orderId, status, user) => {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  if (user.role === "SHOP_OWNER" && order.shopOwnerId.toString() !== user._id.toString()) {
+  const isShopOwner =
+    user.role === "SHOP_OWNER" &&
+    order.shopOwnerId.toString() === user._id.toString();
+  const isAdmin = user.role === "ADMIN";
+
+  if (!isShopOwner && !isAdmin) {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 

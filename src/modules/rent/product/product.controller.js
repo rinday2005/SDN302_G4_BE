@@ -95,3 +95,35 @@ export const deleteProduct = async (
     next(error);
   }
 };
+
+// ======================================================
+// BE-S2-04
+// Admin duyệt / từ chối sản phẩm cho thuê
+// PATCH /api/admin/rent/products/:id/status
+// ======================================================
+export const updateProductStatus = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    const { status, reason } = req.body;
+    const updatedProduct = await productService.updateProductStatus(
+      req.params.id,
+      { status, reason }
+    );
+
+    const message =
+      status === 'APPROVED'
+        ? 'Duyệt sản phẩm thành công'
+        : 'Từ chối sản phẩm thành công';
+
+    return res.status(200).json({
+      success: true,
+      message,
+      data: updatedProduct,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

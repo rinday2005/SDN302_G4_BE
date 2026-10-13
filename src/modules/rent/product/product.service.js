@@ -269,3 +269,58 @@ export const deleteProduct = async (
     message: 'Xóa sản phẩm thành công',
   };
 };
+
+// ======================================================
+// BE-S2-04 - ADMIN DUYỆT / TỪ CHỐI SẢN PHẨM CHO THUÊ
+// PATCH /api/admin/rent/products/:id/status
+// ======================================================
+export const updateProductStatus = async (
+  productId,
+  { status, reason = '' }
+) => {
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    const error = new Error('ID sản phẩm không hợp lệ');
+    error.statusCode = 400;
+    error.errorCode = 'INVALID_PRODUCT_ID';
+    throw error;
+  }
+
+  if (!status || !['APPROVED', 'REJECTED'].includes(status)) {
+    const error = new Error(
+      'Trạng thái duyệt không hợp lệ. Trạng thái hợp lệ: APPROVED, REJECTED'
+    );
+    error.statusCode = 400;
+    error.errorCode = 'INVALID_STATUS';
+    throw error;
+  }
+
+  if (reason !== undefined && typeof reason !== 'string') {
+    const error = new Error('Lý do từ chối phải là chuỗi văn bản');
+    error.statusCode = 400;
+    error.errorCode = 'INVALID_REASON';
+    throw error;
+  }
+
+  const product = await RentalProduct.findById(productId);
+
+  if (!product) {
+    const error = new Error('Sản phẩm không tồn tại');
+    error.statusCode = 404;
+    error.errorCode = 'PRODUCT_NOT_FOUND';
+    throw error;
+  }
+
+  // AC: Chuyển PENDING_APPROVAL -> APPROVED / REJECTED
+  product.status = status;
+
+  if (status === 'REJECTED') {
+    const trimmedReason = reason ? reason.trim() : '';
+    product.rejectionReason = trimmedReason;
+    product.reason = trimmedReason;
+  } else if (status === 'APPROVED') {
+    product.rejectionReason = '';
+    product.reason = '';
+  }
+
+  return await product.save();
+};
