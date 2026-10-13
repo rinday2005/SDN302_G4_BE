@@ -17,9 +17,9 @@ import orderRoutes from "../modules/rent/order/order.route.js";
 import cartRoutes from "../modules/cart/cart.route.js";
 
 import paymentRoutes from "../modules/payment/payment.route.js";
-import productRoutes, {
-  adminProductRouter,
-} from "../modules/rent/product/product.route.js";
+
+import productRoutes from "../modules/rent/product/product.route.js";
+
 import uploadRoutes from "./upload.routes.js";
 import userRoutes from "../modules/user/user.route.js";
 
@@ -46,7 +46,7 @@ router.use("/api/categories", publicCategoryRouter);
 router.use("/api/admin/categories", adminCategoryRouter);
 
 // ======================================================
-// PRODUCT - EXISTING ROUTE
+// PRODUCT
 // ======================================================
 
 // Giữ lại route cũ để không làm ảnh hưởng code hiện tại của team
@@ -57,10 +57,10 @@ router.use("/api/products", productRoutes);
 // Existing /api/products route is preserved for backward compatibility.
 router.use("/api/rent/products", productRoutes);
 
-// NOTE [BE-S2-04]:
-// Register Admin RENT product APIs (approve / reject rental product status).
-router.use("/api/admin/rent/products", adminProductRouter);
-router.use("/api/admin/products", adminProductRouter);
+// NOTE:
+// Admin RENT product routes are temporarily not registered here
+// because adminProductRouter is currently not defined/exported
+// in product.route.js.
 
 // ======================================================
 // RENT ORDER

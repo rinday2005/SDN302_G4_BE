@@ -94,5 +94,4 @@ router.delete(
   deleteProductController
 );
 
-export { adminProductRouter };
 export default router;
