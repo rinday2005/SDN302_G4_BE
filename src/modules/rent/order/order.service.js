@@ -487,6 +487,192 @@ const confirmReceivedOrder = async (orderId, user) => {
   return order;
 };
 
+/**
+ * [BE-S4-01] Yêu cầu trả đồ & upload ảnh hiện trạng (Renter)
+ * Chỉ renter của order mới được request return
+ * Order phải ở trạng thái RENTING
+ * Bắt buộc ít nhất một ảnh hiện trạng
+ * Chuyển trạng thái sang RETURN_REQUESTED
+ */
+const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}) => {
+  assertValidOrderId(orderId);
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  // AC: Chỉ renter của order mới được request return
+  if (order.renterId.toString() !== user._id.toString()) {
+    throw createError(
+      "Chỉ người thuê của đơn hàng mới có quyền yêu cầu trả đồ",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  // AC: order phải ở RENTING
+  if (order.status !== RENTAL_ORDER_STATUS.RENTING) {
+    throw createError(
+      `Chỉ đơn hàng đang trong thời gian thuê (RENTING) mới có thể yêu cầu trả đồ (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_NOT_RENTING"
+    );
+  }
+
+  // Chuẩn hóa danh sách ảnh
+  let imageList = [];
+  if (Array.isArray(images)) {
+    imageList = images.filter((img) => typeof img === "string" && img.trim() !== "");
+  } else if (typeof images === "string" && images.trim() !== "") {
+    imageList = [images.trim()];
+  }
+
+  // AC: Bắt buộc ít nhất một ảnh
+  if (imageList.length === 0) {
+    throw createError(
+      "Bắt buộc phải cung cấp ít nhất một hình ảnh hiện trạng sản phẩm khi yêu cầu trả đồ",
+      400,
+      "IMAGES_REQUIRED"
+    );
+  }
+
+  // Ghi nhận yêu cầu trả đồ ở cấp order (ảnh, ghi chú, thời điểm yêu cầu)
+  order.returnRequest = {
+    images: imageList,
+    note: (note || "").trim(),
+    requestedAt: new Date(),
+  };
+
+  // AC: chuyển trạng thái RETURN_REQUESTED
+  order.status = RENTAL_ORDER_STATUS.RETURN_REQUESTED;
+  await order.save();
+
+  return order;
+};
+
+/**
+ * [BE-S4-02] Kiểm định hư hại & quyết định hoàn cọc (Shop Owner)
+ * Kiểm tra toàn bộ items trong RentalOrder
+ * damagePenaltyAmount <= depositAmount
+ * Tiền hoàn = depositAmount - damagePenaltyAmount
+ * Không cho hoàn cọc hai lần
+ * Lưu lý do/ảnh bằng chứng nếu có hư hại
+ * Sau kiểm định order chuyển COMPLETED
+ */
+const inspectAndRefundOrder = async (
+  orderId,
+  user,
+  {
+    damagePenaltyAmount = 0,
+    reason = "",
+    damageImages = [],
+    itemInspections = [],
+  } = {}
+) => {
+  assertValidOrderId(orderId);
+
+  // 1. Kiểm tra quyền Shop Owner
+  if (user.role !== "SHOP_OWNER") {
+    throw createError(
+      "Chỉ Shop Owner mới có quyền kiểm định và quyết định hoàn cọc",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  if (order.shopOwnerId.toString() !== user._id.toString()) {
+    throw createError("Forbidden", 403, "FORBIDDEN");
+  }
+
+  // 2. AC: không cho hoàn cọc hai lần
+  if (order.status === RENTAL_ORDER_STATUS.COMPLETED || order.inspectionResult) {
+    throw createError(
+      "Đơn hàng này đã được kiểm định và hoàn tất quyết định hoàn cọc trước đó",
+      400,
+      "ORDER_ALREADY_INSPECTED"
+    );
+  }
+
+  // 3. Trạng thái hợp lệ để kiểm định: Hàng đã gửi trả hoặc đã về tới shop
+  const validInspectionStatuses = [
+    RENTAL_ORDER_STATUS.RETURNING,
+    RENTAL_ORDER_STATUS.RETURNED,
+    RENTAL_ORDER_STATUS.RETURN_REQUESTED,
+  ];
+
+  if (!validInspectionStatuses.includes(order.status)) {
+    throw createError(
+      `Đơn hàng chưa ở trạng thái trả hàng để tiến hành kiểm định (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_NOT_READY_FOR_INSPECTION"
+    );
+  }
+
+  // 4. Tính toán tiền phạt và tiền hoàn
+  const penalty = Math.max(0, Number(damagePenaltyAmount) || 0);
+
+  // AC: Tổng tiền phạt không vượt quá tiền cọc
+  if (penalty > order.depositAmount) {
+    throw createError(
+      `Tổng tiền phạt hư hại (${penalty}) không được vượt quá số tiền cọc của đơn hàng (${order.depositAmount})`,
+      400,
+      "PENALTY_EXCEEDS_DEPOSIT"
+    );
+  }
+
+  // Chuẩn hóa danh sách ảnh bằng chứng hư hại
+  let imageList = [];
+  if (Array.isArray(damageImages)) {
+    imageList = damageImages.filter((img) => typeof img === "string" && img.trim() !== "");
+  } else if (typeof damageImages === "string" && damageImages.trim() !== "") {
+    imageList = [damageImages.trim()];
+  }
+
+  // AC: lưu lý do/ảnh bằng chứng nếu có hư hại
+  if (penalty > 0) {
+    if (!reason || !reason.trim()) {
+      throw createError(
+        "Vui lòng cung cấp lý do hư hại khi áp dụng trừ tiền phạt cọc",
+        400,
+        "DAMAGE_REASON_REQUIRED"
+      );
+    }
+    if (imageList.length === 0) {
+      throw createError(
+        "Vui lòng cung cấp ít nhất một hình ảnh bằng chứng hư hại",
+        400,
+        "DAMAGE_IMAGES_REQUIRED"
+      );
+    }
+  }
+
+  // Tiền hoàn = depositAmount - damagePenaltyAmount (nếu không hư hại, hoàn 100% cọc)
+  const refundAmount = Math.max(0, order.depositAmount - penalty);
+
+  // 5. AC: order nhiều item vẫn chỉ có một kết quả hoàn cọc ở cấp order
+  order.inspectionResult = {
+    damagePenaltyAmount: penalty,
+    refundAmount,
+    reason: (reason || "").trim(),
+    damageImages: imageList,
+    itemInspections: Array.isArray(itemInspections) ? itemInspections : [],
+    inspectedAt: new Date(),
+    inspectedBy: user._id,
+  };
+
+  // 6. Sau kiểm định, order chuyển COMPLETED
+  order.status = RENTAL_ORDER_STATUS.COMPLETED;
+  await order.save();
+
+  return order;
+};
+
 export {
   createOrder,
   getUserOrders,
@@ -498,4 +684,6 @@ export {
   rejectOrder,
   handoverOrder,
   confirmReceivedOrder,
+  requestReturnOrder,
+  inspectAndRefundOrder,
 };

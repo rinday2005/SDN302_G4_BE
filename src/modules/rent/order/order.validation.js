@@ -92,8 +92,46 @@ const validateHandoverOrder = (req, res, next) => {
   next();
 };
 
+const validateRequestReturnOrder = (req, res, next) => {
+  const { images } = req.body;
+  const hasFiles = (req.files && req.files.length > 0) || req.file;
+
+  const hasBodyImages =
+    (Array.isArray(images) && images.some((img) => typeof img === "string" && img.trim())) ||
+    (typeof images === "string" && images.trim());
+
+  if (!hasFiles && !hasBodyImages) {
+    return fail(
+      next,
+      "Bắt buộc phải cung cấp ít nhất một hình ảnh hiện trạng sản phẩm",
+      "IMAGES_REQUIRED"
+    );
+  }
+
+  next();
+};
+
+const validateInspectAndRefundOrder = (req, res, next) => {
+  const { damagePenaltyAmount } = req.body;
+
+  if (
+    damagePenaltyAmount !== undefined &&
+    (isNaN(Number(damagePenaltyAmount)) || Number(damagePenaltyAmount) < 0)
+  ) {
+    return fail(
+      next,
+      "damagePenaltyAmount phải là số không âm",
+      "INVALID_PENALTY_AMOUNT"
+    );
+  }
+
+  next();
+};
+
 export {
   validateCreateOrder,
   validateUpdateOrderStatus,
   validateHandoverOrder,
+  validateRequestReturnOrder,
+  validateInspectAndRefundOrder,
 };

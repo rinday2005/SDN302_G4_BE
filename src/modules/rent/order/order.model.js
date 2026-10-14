@@ -20,6 +20,7 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   SHIPPING: "SHIPPING", // Đang giao hàng tới Renter
   DELIVERED: "DELIVERED", // Hàng đã được giao tới địa chỉ
   RENTING: "RENTING", // Renter đã nhận đồ và bắt đầu tính thời gian thuê
+  RETURN_REQUESTED: "RETURN_REQUESTED", // Renter gửi yêu cầu trả đồ kèm ảnh hiện trạng
   RETURNING: "RETURNING", // Renter đang gửi trả hàng
   RETURNED: "RETURNED", // Shop đã nhận lại hàng, chờ kiểm tra / hoàn cọc
   COMPLETED: "COMPLETED", // Hoàn tất đơn thuê
@@ -36,9 +37,10 @@ export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   CONFIRMED: ["PREPARING", "READY_FOR_HANDOVER", "HANDED_OVER", "CANCELLED"],
   PREPARING: ["READY_FOR_HANDOVER", "HANDED_OVER", "SHIPPING", "CANCELLED"],
   SHIPPING: ["DELIVERED", "RENTING"],
-  DELIVERED: ["RENTING", "RETURNING"],
-  RENTING: ["RETURNING", "COMPLETED"],
-  RETURNING: ["RETURNED"],
+  DELIVERED: ["RENTING", "RETURN_REQUESTED", "RETURNING"],
+  RENTING: ["RETURN_REQUESTED", "RETURNING", "COMPLETED"],
+  RETURN_REQUESTED: ["RETURNING", "COMPLETED", "CANCELLED"],
+  RETURNING: ["RETURNED", "COMPLETED"],
   RETURNED: ["COMPLETED"],
   REJECTED: [],
   COMPLETED: [],
@@ -129,6 +131,97 @@ const shippingDetailsSchema = new mongoose.Schema(
     returnTrackingCode: { type: String, trim: true, default: "" },
     returnShippedAt: { type: Date, default: null },
     returnedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+// Thông tin yêu cầu trả đồ và ảnh hiện trạng (cấp order)
+const returnRequestSchema = new mongoose.Schema(
+  {
+    images: {
+      type: [String],
+      required: [true, "Danh sách ảnh hiện trạng là bắt buộc"],
+      validate: {
+        validator: (v) => Array.isArray(v) && v.length > 0,
+        message: "Bắt buộc phải có ít nhất một ảnh hiện trạng",
+      },
+    },
+    note: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    requestedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+// Chi tiết kiểm định từng item trong đơn (nếu có hư hại)
+const itemInspectionSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RentalProduct",
+      required: true,
+    },
+    condition: {
+      type: String,
+      enum: ["GOOD", "MINOR_DAMAGE", "DAMAGED", "LOST"],
+      default: "GOOD",
+    },
+    damageNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    penaltyAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+// Kết quả kiểm định hư hại và quyết định hoàn cọc (cấp order)
+const inspectionResultSchema = new mongoose.Schema(
+  {
+    damagePenaltyAmount: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+    refundAmount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    reason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    damageImages: {
+      type: [String],
+      default: [],
+    },
+    itemInspections: {
+      type: [itemInspectionSchema],
+      default: [],
+    },
+    inspectedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    inspectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   { _id: false }
 );
@@ -241,6 +334,14 @@ const rentalOrderSchema = new mongoose.Schema(
     shippingDetails: {
       type: shippingDetailsSchema,
       default: () => ({}),
+    },
+    returnRequest: {
+      type: returnRequestSchema,
+      default: null,
+    },
+    inspectionResult: {
+      type: inspectionResultSchema,
+      default: null,
     },
   },
   {

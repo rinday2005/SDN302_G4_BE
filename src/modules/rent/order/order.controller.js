@@ -9,7 +9,10 @@ import {
   rejectOrder,
   handoverOrder,
   confirmReceivedOrder,
+  requestReturnOrder,
+  inspectAndRefundOrder,
 } from "./order.service.js";
+import cloudinary from "../../../config/cloudinary.js";
 import { successResponse } from "../../../utils/response.js";
 
 const createOrderController = async (req, res, next) => {
@@ -131,6 +134,121 @@ const confirmReceivedOrderController = async (req, res, next) => {
   }
 };
 
+const uploadBufferToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "reuse_hub/returns",
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+    stream.end(buffer);
+  });
+};
+
+const requestReturnOrderController = async (req, res, next) => {
+  try {
+    let images = [];
+
+    // 1. Nếu có file upload từ multipart/form-data
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      const uploadPromises = req.files.map((file) =>
+        uploadBufferToCloudinary(file.buffer)
+      );
+      const uploadedUrls = await Promise.all(uploadPromises);
+      images.push(...uploadedUrls);
+    } else if (req.file) {
+      const uploadedUrl = await uploadBufferToCloudinary(req.file.buffer);
+      images.push(uploadedUrl);
+    }
+
+    // 2. Nếu có mảng ảnh truyền dạng URL trong body
+    if (req.body.images) {
+      if (Array.isArray(req.body.images)) {
+        images.push(...req.body.images);
+      } else if (typeof req.body.images === "string") {
+        images.push(req.body.images);
+      }
+    }
+
+    const order = await requestReturnOrder(req.params.id, req.user, {
+      images,
+      note: req.body.note,
+    });
+
+    return successResponse(
+      res,
+      "Return request submitted successfully. Waiting for shop review.",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+const inspectAndRefundOrderController = async (req, res, next) => {
+  try {
+    let damageImages = [];
+
+    // 1. Nếu có file upload từ form-data (array, fields object, hoặc single file)
+    let filesToUpload = [];
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      filesToUpload = req.files;
+    } else if (req.files && typeof req.files === "object") {
+      filesToUpload = Object.values(req.files).flat();
+    } else if (req.file) {
+      filesToUpload = [req.file];
+    }
+
+    if (filesToUpload.length > 0) {
+      const uploadPromises = filesToUpload.map((file) =>
+        uploadBufferToCloudinary(file.buffer)
+      );
+      const uploadedUrls = await Promise.all(uploadPromises);
+      damageImages.push(...uploadedUrls);
+    }
+
+    // 2. Nếu có mảng ảnh trong body (damageImages hoặc images)
+    const bodyImages = req.body.damageImages || req.body.images;
+    if (bodyImages) {
+      if (Array.isArray(bodyImages)) {
+        damageImages.push(...bodyImages);
+      } else if (typeof bodyImages === "string") {
+        damageImages.push(bodyImages);
+      }
+    }
+
+    // Parse itemInspections nếu gửi chuỗi JSON
+    let itemInspections = req.body.itemInspections || [];
+    if (typeof itemInspections === "string") {
+      try {
+        itemInspections = JSON.parse(itemInspections);
+      } catch (e) {
+        itemInspections = [];
+      }
+    }
+
+    const order = await inspectAndRefundOrder(req.params.id, req.user, {
+      damagePenaltyAmount: req.body.damagePenaltyAmount,
+      reason: req.body.reason || req.body.damageReason,
+      damageImages,
+      itemInspections,
+    });
+
+    return successResponse(
+      res,
+      "Order inspection and refund decision completed successfully. Order marked as COMPLETED.",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -142,4 +260,6 @@ export {
   rejectOrderController,
   handoverOrderController,
   confirmReceivedOrderController,
+  requestReturnOrderController,
+  inspectAndRefundOrderController,
 };
