@@ -111,9 +111,27 @@ const validateRequestReturnOrder = (req, res, next) => {
   next();
 };
 
+const validateInspectAndRefundOrder = (req, res, next) => {
+  const { damagePenaltyAmount } = req.body;
+
+  if (
+    damagePenaltyAmount !== undefined &&
+    (isNaN(Number(damagePenaltyAmount)) || Number(damagePenaltyAmount) < 0)
+  ) {
+    return fail(
+      next,
+      "damagePenaltyAmount phải là số không âm",
+      "INVALID_PENALTY_AMOUNT"
+    );
+  }
+
+  next();
+};
+
 export {
   validateCreateOrder,
   validateUpdateOrderStatus,
   validateHandoverOrder,
   validateRequestReturnOrder,
+  validateInspectAndRefundOrder,
 };

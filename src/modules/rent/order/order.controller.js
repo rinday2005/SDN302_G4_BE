@@ -10,6 +10,7 @@ import {
   handoverOrder,
   confirmReceivedOrder,
   requestReturnOrder,
+  inspectAndRefundOrder,
 } from "./order.service.js";
 import cloudinary from "../../../config/cloudinary.js";
 import { successResponse } from "../../../utils/response.js";
@@ -189,6 +190,65 @@ const requestReturnOrderController = async (req, res, next) => {
   }
 };
 
+const inspectAndRefundOrderController = async (req, res, next) => {
+  try {
+    let damageImages = [];
+
+    // 1. Nếu có file upload từ form-data (array, fields object, hoặc single file)
+    let filesToUpload = [];
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      filesToUpload = req.files;
+    } else if (req.files && typeof req.files === "object") {
+      filesToUpload = Object.values(req.files).flat();
+    } else if (req.file) {
+      filesToUpload = [req.file];
+    }
+
+    if (filesToUpload.length > 0) {
+      const uploadPromises = filesToUpload.map((file) =>
+        uploadBufferToCloudinary(file.buffer)
+      );
+      const uploadedUrls = await Promise.all(uploadPromises);
+      damageImages.push(...uploadedUrls);
+    }
+
+    // 2. Nếu có mảng ảnh trong body (damageImages hoặc images)
+    const bodyImages = req.body.damageImages || req.body.images;
+    if (bodyImages) {
+      if (Array.isArray(bodyImages)) {
+        damageImages.push(...bodyImages);
+      } else if (typeof bodyImages === "string") {
+        damageImages.push(bodyImages);
+      }
+    }
+
+    // Parse itemInspections nếu gửi chuỗi JSON
+    let itemInspections = req.body.itemInspections || [];
+    if (typeof itemInspections === "string") {
+      try {
+        itemInspections = JSON.parse(itemInspections);
+      } catch (e) {
+        itemInspections = [];
+      }
+    }
+
+    const order = await inspectAndRefundOrder(req.params.id, req.user, {
+      damagePenaltyAmount: req.body.damagePenaltyAmount,
+      reason: req.body.reason || req.body.damageReason,
+      damageImages,
+      itemInspections,
+    });
+
+    return successResponse(
+      res,
+      "Order inspection and refund decision completed successfully. Order marked as COMPLETED.",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -201,4 +261,5 @@ export {
   handoverOrderController,
   confirmReceivedOrderController,
   requestReturnOrderController,
+  inspectAndRefundOrderController,
 };

@@ -14,12 +14,14 @@ import {
   handoverOrderController,
   confirmReceivedOrderController,
   requestReturnOrderController,
+  inspectAndRefundOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
   validateUpdateOrderStatus,
   validateHandoverOrder,
   validateRequestReturnOrder,
+  validateInspectAndRefundOrder,
 } from "./order.validation.js";
 
 const router = Router();
@@ -64,6 +66,15 @@ router.post(
   upload.array("images", 5),
   validateRequestReturnOrder,
   requestReturnOrderController
+);
+
+// [BE-S4-02] Shop Owner kiểm định hư hại & quyết định hoàn cọc -> chuyển COMPLETED
+router.post(
+  "/:id/inspect-and-refund",
+  authorize(["SHOP_OWNER"]),
+  upload.any(),
+  validateInspectAndRefundOrder,
+  inspectAndRefundOrderController
 );
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)

@@ -39,8 +39,8 @@ export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   SHIPPING: ["DELIVERED", "RENTING"],
   DELIVERED: ["RENTING", "RETURN_REQUESTED", "RETURNING"],
   RENTING: ["RETURN_REQUESTED", "RETURNING", "COMPLETED"],
-  RETURN_REQUESTED: ["RETURNING", "CANCELLED"],
-  RETURNING: ["RETURNED"],
+  RETURN_REQUESTED: ["RETURNING", "COMPLETED", "CANCELLED"],
+  RETURNING: ["RETURNED", "COMPLETED"],
   RETURNED: ["COMPLETED"],
   REJECTED: [],
   COMPLETED: [],
@@ -159,6 +159,73 @@ const returnRequestSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Chi tiết kiểm định từng item trong đơn (nếu có hư hại)
+const itemInspectionSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RentalProduct",
+      required: true,
+    },
+    condition: {
+      type: String,
+      enum: ["GOOD", "MINOR_DAMAGE", "DAMAGED", "LOST"],
+      default: "GOOD",
+    },
+    damageNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    penaltyAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+// Kết quả kiểm định hư hại và quyết định hoàn cọc (cấp order)
+const inspectionResultSchema = new mongoose.Schema(
+  {
+    damagePenaltyAmount: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+    refundAmount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    reason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    damageImages: {
+      type: [String],
+      default: [],
+    },
+    itemInspections: {
+      type: [itemInspectionSchema],
+      default: [],
+    },
+    inspectedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    inspectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+  },
+  { _id: false }
+);
+
 const rentalOrderSchema = new mongoose.Schema(
   {
     orderCode: {
@@ -270,6 +337,10 @@ const rentalOrderSchema = new mongoose.Schema(
     },
     returnRequest: {
       type: returnRequestSchema,
+      default: null,
+    },
+    inspectionResult: {
+      type: inspectionResultSchema,
       default: null,
     },
   },
