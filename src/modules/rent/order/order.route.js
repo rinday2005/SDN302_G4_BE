@@ -1,6 +1,7 @@
 import { Router } from "express";
 import authMiddleware from "../../../middleware/auth.middleware.js";
 import authorize from "../../../middleware/role.middleware.js";
+import upload from "../../../middleware/upload.middleware.js";
 import {
   createOrderController,
   getUserOrdersController,
@@ -12,11 +13,13 @@ import {
   rejectOrderController,
   handoverOrderController,
   confirmReceivedOrderController,
+  requestReturnOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
   validateUpdateOrderStatus,
   validateHandoverOrder,
+  validateRequestReturnOrder,
 } from "./order.validation.js";
 
 const router = Router();
@@ -52,6 +55,15 @@ router.post(
   "/:id/confirm-received",
   authorize(["USER"]),
   confirmReceivedOrderController
+);
+
+// [BE-S4-01] Renter yêu cầu trả đồ & upload ảnh hiện trạng (chuyển sang RETURN_REQUESTED)
+router.post(
+  "/:id/request-return",
+  authorize(["USER"]),
+  upload.array("images", 5),
+  validateRequestReturnOrder,
+  requestReturnOrderController
 );
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)

@@ -487,6 +487,70 @@ const confirmReceivedOrder = async (orderId, user) => {
   return order;
 };
 
+/**
+ * [BE-S4-01] Yêu cầu trả đồ & upload ảnh hiện trạng (Renter)
+ * Chỉ renter của order mới được request return
+ * Order phải ở trạng thái RENTING
+ * Bắt buộc ít nhất một ảnh hiện trạng
+ * Chuyển trạng thái sang RETURN_REQUESTED
+ */
+const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}) => {
+  assertValidOrderId(orderId);
+
+  const order = await RentalOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  // AC: Chỉ renter của order mới được request return
+  if (order.renterId.toString() !== user._id.toString()) {
+    throw createError(
+      "Chỉ người thuê của đơn hàng mới có quyền yêu cầu trả đồ",
+      403,
+      "FORBIDDEN"
+    );
+  }
+
+  // AC: order phải ở RENTING
+  if (order.status !== RENTAL_ORDER_STATUS.RENTING) {
+    throw createError(
+      `Chỉ đơn hàng đang trong thời gian thuê (RENTING) mới có thể yêu cầu trả đồ (Trạng thái hiện tại: ${order.status})`,
+      400,
+      "ORDER_NOT_RENTING"
+    );
+  }
+
+  // Chuẩn hóa danh sách ảnh
+  let imageList = [];
+  if (Array.isArray(images)) {
+    imageList = images.filter((img) => typeof img === "string" && img.trim() !== "");
+  } else if (typeof images === "string" && images.trim() !== "") {
+    imageList = [images.trim()];
+  }
+
+  // AC: Bắt buộc ít nhất một ảnh
+  if (imageList.length === 0) {
+    throw createError(
+      "Bắt buộc phải cung cấp ít nhất một hình ảnh hiện trạng sản phẩm khi yêu cầu trả đồ",
+      400,
+      "IMAGES_REQUIRED"
+    );
+  }
+
+  // Ghi nhận yêu cầu trả đồ ở cấp order (ảnh, ghi chú, thời điểm yêu cầu)
+  order.returnRequest = {
+    images: imageList,
+    note: (note || "").trim(),
+    requestedAt: new Date(),
+  };
+
+  // AC: chuyển trạng thái RETURN_REQUESTED
+  order.status = RENTAL_ORDER_STATUS.RETURN_REQUESTED;
+  await order.save();
+
+  return order;
+};
+
 export {
   createOrder,
   getUserOrders,
@@ -498,4 +562,5 @@ export {
   rejectOrder,
   handoverOrder,
   confirmReceivedOrder,
+  requestReturnOrder,
 };
