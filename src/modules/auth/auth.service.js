@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
 import User from "../user/user.model.js";
+import Cart from "../cart/cart.model.js";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../../config/env.js";
 
 const register = async ({ email, password, fullName, phoneNumber, role }) => {
@@ -40,6 +41,12 @@ const register = async ({ email, password, fullName, phoneNumber, role }) => {
     fullName,
     phoneNumber,
     role: assignedRole,
+  });
+
+  await Cart.create({
+    userId: user._id,
+    rentItems: [],
+    thriftItems: [],
   });
 
   return {

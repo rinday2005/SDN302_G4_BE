@@ -179,6 +179,20 @@ describe("[TEST-S3-02] Integration Tests: Shipping Zone & Phân quyền Thao tá
     if (createdOrderBId) {
       await RentalOrder.findByIdAndDelete(createdOrderBId);
     }
+    if (product1?._id) {
+      await RentalProduct.findByIdAndDelete(product1._id);
+    }
+    if (product2?._id) {
+      await RentalProduct.findByIdAndDelete(product2._id);
+    }
+    if (testCategory?._id) {
+      await Category.findByIdAndDelete(testCategory._id);
+    }
+    const testUserIds = [userA?._id, userB?._id, userUnapproved?._id].filter(Boolean);
+    if (testUserIds.length > 0) {
+      await Cart.deleteMany({ userId: { $in: testUserIds } });
+      await User.deleteMany({ _id: { $in: testUserIds } });
+    }
     if (serverHelper) {
       await serverHelper.close();
     }
