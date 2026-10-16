@@ -7,6 +7,7 @@ const router = express.Router();
 
 // Public: Xem danh sách bài đăng (chỉ lấy status APPROVED)
 router.get("/", thriftController.getPublicThriftListings);
+router.get("/:id", thriftController.getThriftListingById);
 
 // Private: Chỉ Shop Owner mới có quyền tạo và sửa
 // AC: User gọi API này trả 403

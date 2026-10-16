@@ -45,3 +45,16 @@ export const getPublicListings = async (query = {}) => {
   };
   return await ThriftListing.find(filter).populate("categoryId", "name").lean();
 };
+
+// 4. Lấy chi tiết listing theo ID
+export const getListingById = async (listingId) => {
+  const listing = await ThriftListing.findById(listingId)
+    .populate("categoryId", "name")
+    .populate("ownerId", "fullName email phoneNumber address");
+  if (!listing) {
+    const error = new Error("Sản phẩm thanh lý không tồn tại");
+    error.statusCode = 404;
+    throw error;
+  }
+  return listing;
+};

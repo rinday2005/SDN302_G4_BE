@@ -4,9 +4,16 @@ const paymentSchema = new mongoose.Schema(
   {
     orderId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "RentalOrder",
+      refPath: "orderModel",
       required: [true, "orderId là bắt buộc"],
       index: true,
+    },
+    orderModel: {
+      type: String,
+      enum: ["RentalOrder", "ThriftOrder"],
+      default: function () {
+        return this.orderType === "THRIFT" ? "ThriftOrder" : "RentalOrder";
+      },
     },
     orderType: {
       type: String,

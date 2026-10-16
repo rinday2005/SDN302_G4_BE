@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
+import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
+import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
 import {
   buildVnPayUrl,
@@ -13,6 +15,11 @@ import {
   VNPAY_RETURN_URL,
 } from "../../config/env.js";
 
+const DEFAULT_HASH_SECRET = VNPAY_HASH_SECRET || "REUSE_HUB_VNPAY_SECRET_2026";
+const DEFAULT_TMN_CODE = VNPAY_TMN_CODE || "REUSEHUB";
+const DEFAULT_VNP_URL = VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+const DEFAULT_RETURN_URL = VNPAY_RETURN_URL || "http://localhost:5173/payment-return";
+
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -21,7 +28,7 @@ const createError = (message, statusCode, errorCode) => {
 };
 
 /**
- * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox (hỗ trợ cả đơn DB lẫn đơn tĩnh)
+ * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox (hỗ trợ cả đơn DB lẫn đơn tĩnh, RENT và THRIFT)
  */
 const createVnPayPaymentUrl = async ({
   user,
@@ -36,24 +43,48 @@ const createVnPayPaymentUrl = async ({
   let order = null;
   let payAmount = amount ? Number(amount) : null;
   let code = orderCode || `RH_${Date.now().toString().slice(-6)}`;
+  let isThrift = type === "THRIFT";
 
-  // 1. Nếu có orderId hợp lệ, thử tìm trong MongoDB
+  // 1. Nếu có orderId hợp lệ, thử tìm trong RentalOrder hoặc ThriftOrder
   if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
-    order = await RentalOrder.findById(orderId);
+    if (isThrift) {
+      order = await ThriftOrder.findById(orderId);
+      if (!order) order = await RentalOrder.findById(orderId);
+    } else {
+      order = await RentalOrder.findById(orderId);
+      if (!order) {
+        order = await ThriftOrder.findById(orderId);
+        if (order) isThrift = true;
+      }
+    }
   }
 
   // Nếu chưa tìm thấy bằng orderId, thử tìm bằng orderCode nếu có
   if (!order && orderCode) {
-    order = await RentalOrder.findOne({ orderCode });
+    if (isThrift) {
+      order = await ThriftOrder.findOne({ orderCode });
+      if (!order) order = await RentalOrder.findOne({ orderCode });
+    } else {
+      order = await RentalOrder.findOne({ orderCode });
+      if (!order) {
+        order = await ThriftOrder.findOne({ orderCode });
+        if (order) isThrift = true;
+      }
+    }
   }
 
   // 2. Nếu tìm thấy đơn hàng trong DB -> dùng thông tin từ DB
   if (order) {
-    if (order.renterId.toString() !== user._id.toString()) {
+    const buyerId = order.renterId || order.buyerId || order.userId;
+    if (buyerId && buyerId.toString() !== user._id.toString()) {
       throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
     }
     payAmount = order.totalAmount;
     code = order.orderCode;
+    if (order.items && order.items[0]?.listingId) {
+      isThrift = true;
+      type = "THRIFT";
+    }
   } else {
     // 3. Nếu chưa có đơn trong DB (data tĩnh từ FE) -> Tự tạo 1 RentalOrder tạm hợp lệ trong MongoDB gắn với user đang đăng nhập
     payAmount = payAmount || 1500000;
@@ -113,7 +144,8 @@ const createVnPayPaymentUrl = async ({
   // 5. Lưu payment record trạng thái PENDING
   await Payment.create({
     orderId: order._id,
-    orderType: type,
+    orderModel: isThrift ? "ThriftOrder" : "RentalOrder",
+    orderType: isThrift ? "THRIFT" : "RENT",
     userId: user._id,
     amount: payAmount,
     status: "PENDING",
@@ -123,11 +155,11 @@ const createVnPayPaymentUrl = async ({
   });
 
   // 6. Tạo VNPay Payment URL (Sandbox)
-  const effectiveReturnUrl = returnUrl || VNPAY_RETURN_URL;
+  const effectiveReturnUrl = returnUrl || DEFAULT_RETURN_URL;
   const paymentUrl = buildVnPayUrl({
-    tmnCode: VNPAY_TMN_CODE,
-    hashSecret: VNPAY_HASH_SECRET,
-    vnpUrl: VNPAY_URL,
+    tmnCode: DEFAULT_TMN_CODE,
+    hashSecret: DEFAULT_HASH_SECRET,
+    vnpUrl: DEFAULT_VNP_URL,
     returnUrl: effectiveReturnUrl,
     ipAddr: ipAddress,
     amount: payAmount,
@@ -151,7 +183,7 @@ const createVnPayPaymentUrl = async ({
  */
 const processVnPayIpn = async (queryParams = {}) => {
   // 1. AC: Xác minh chữ ký VNPay (checksum SHA512)
-  const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
+  const isValidSignature = verifyVnPaySignature(queryParams, DEFAULT_HASH_SECRET);
   if (!isValidSignature) {
     return { RspCode: "97", Message: "Invalid Checksum" };
   }
@@ -164,15 +196,29 @@ const processVnPayIpn = async (queryParams = {}) => {
   // 2. Tìm payment record theo txnRef
   let payment = await Payment.findOne({ txnRef });
 
-  // 3. Tìm RentalOrder
+  // 3. Tìm RentalOrder hoặc ThriftOrder
   let order = null;
+  let isThrift = payment?.orderType === "THRIFT";
+
   if (payment) {
-    order = await RentalOrder.findById(payment.orderId);
+    if (isThrift) {
+      order = await ThriftOrder.findById(payment.orderId);
+    } else {
+      order = await RentalOrder.findById(payment.orderId);
+      if (!order) {
+        order = await ThriftOrder.findById(payment.orderId);
+        if (order) isThrift = true;
+      }
+    }
   } else {
     // Fallback: tìm qua orderCode trong txnRef
     const orderCode = txnRef?.split("_")[0];
     if (orderCode) {
       order = await RentalOrder.findOne({ orderCode });
+      if (!order) {
+        order = await ThriftOrder.findOne({ orderCode });
+        if (order) isThrift = true;
+      }
     }
   }
 
@@ -186,11 +232,12 @@ const processVnPayIpn = async (queryParams = {}) => {
   }
 
   // 5. AC: Không tạo duplicate payment record / không xử lý đơn đã confirm
-  if (
+  const isAlreadyPaid =
     (payment && payment.status === "PAID") ||
-    order.status === RENTAL_ORDER_STATUS.PAID ||
-    order.paymentStatus === "PAID"
-  ) {
+    order.status === "PAID" ||
+    order.paymentStatus === "PAID";
+
+  if (isAlreadyPaid) {
     return { RspCode: "02", Message: "Order already confirmed" };
   }
 
@@ -198,9 +245,18 @@ const processVnPayIpn = async (queryParams = {}) => {
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // AC: Thanh toán thành công -> cập nhật RentalOrder thành PAID
-    order.status = RENTAL_ORDER_STATUS.PAID;
-    order.paymentStatus = "PAID";
+    if (isThrift) {
+      // AC: Khóa Sản phẩm Đã bán (Atomic Lock) cho ThriftOrder
+      await lockAndMarkOrderPaid(order._id, {
+        transactionNo: queryParams.vnp_TransactionNo || "",
+        bankCode: queryParams.vnp_BankCode || "",
+      });
+    } else {
+      // AC: Thanh toán thành công -> cập nhật RentalOrder thành PAID
+      order.status = RENTAL_ORDER_STATUS.PAID;
+      order.paymentStatus = "PAID";
+      await order.save();
+    }
 
     if (payment) {
       payment.status = "PAID";
@@ -212,8 +268,9 @@ const processVnPayIpn = async (queryParams = {}) => {
     } else {
       await Payment.create({
         orderId: order._id,
-        orderType: "RENT",
-        userId: order.renterId,
+        orderModel: isThrift ? "ThriftOrder" : "RentalOrder",
+        orderType: isThrift ? "THRIFT" : "RENT",
+        userId: order.renterId || order.buyerId || order.userId,
         amount: order.totalAmount,
         status: "PAID",
         method: "VNPAY",
@@ -225,7 +282,6 @@ const processVnPayIpn = async (queryParams = {}) => {
       });
     }
 
-    await order.save();
     return { RspCode: "00", Message: "Confirm Success" };
   } else {
     // Thanh toán thất bại hoặc khách hủy
@@ -246,7 +302,7 @@ const processVnPayIpn = async (queryParams = {}) => {
  */
 const processVnPayReturn = async (queryParams = {}) => {
   // 1. AC: Xác minh chữ ký
-  const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
+  const isValidSignature = verifyVnPaySignature(queryParams, DEFAULT_HASH_SECRET);
   if (!isValidSignature) {
     return {
       success: false,
@@ -263,13 +319,26 @@ const processVnPayReturn = async (queryParams = {}) => {
 
   let payment = await Payment.findOne({ txnRef });
   let order = null;
+  let isThrift = payment?.orderType === "THRIFT";
 
   if (payment) {
-    order = await RentalOrder.findById(payment.orderId);
+    if (isThrift) {
+      order = await ThriftOrder.findById(payment.orderId);
+    } else {
+      order = await RentalOrder.findById(payment.orderId);
+      if (!order) {
+        order = await ThriftOrder.findById(payment.orderId);
+        if (order) isThrift = true;
+      }
+    }
   } else {
     const orderCode = txnRef?.split("_")[0];
     if (orderCode) {
       order = await RentalOrder.findOne({ orderCode });
+      if (!order) {
+        order = await ThriftOrder.findOne({ orderCode });
+        if (order) isThrift = true;
+      }
     }
   }
 
@@ -297,11 +366,19 @@ const processVnPayReturn = async (queryParams = {}) => {
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // Đảm bảo đơn được cập nhật PAID nếu IPN chưa xử lý kịp
-    if (order.status !== RENTAL_ORDER_STATUS.PAID) {
-      order.status = RENTAL_ORDER_STATUS.PAID;
-      order.paymentStatus = "PAID";
-      await order.save();
+    if (isThrift) {
+      // AC: Khóa Sản phẩm Đã bán (Atomic Lock) cho ThriftOrder
+      await lockAndMarkOrderPaid(order._id, {
+        transactionNo: queryParams.vnp_TransactionNo || "",
+        bankCode: queryParams.vnp_BankCode || "",
+      });
+    } else {
+      // Đảm bảo đơn được cập nhật PAID nếu IPN chưa xử lý kịp
+      if (order.status !== RENTAL_ORDER_STATUS.PAID) {
+        order.status = RENTAL_ORDER_STATUS.PAID;
+        order.paymentStatus = "PAID";
+        await order.save();
+      }
     }
 
     if (payment && payment.status !== "PAID") {
@@ -348,3 +425,4 @@ export {
   processVnPayIpn,
   processVnPayReturn,
 };
+

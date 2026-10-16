@@ -40,3 +40,16 @@ export const getPublicThriftListings = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getThriftListingById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const listing = await thriftService.getListingById(id);
+    return res.status(200).json({
+      success: true,
+      data: listing,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
