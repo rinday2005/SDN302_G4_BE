@@ -10,6 +10,10 @@ import {
   cancelThriftOrder,
   updateThriftOrderStatus,
 } from "./thriftOrder.controller.js";
+import {
+  validateCheckoutThriftOrder,
+  validateUpdateThriftOrderStatus,
+} from "./thriftOrder.validation.js";
 
 const router = Router();
 
@@ -17,8 +21,8 @@ const router = Router();
 router.use(authMiddleware);
 
 // [BE-S4-05] API Đặt mua Đồ THRIFT
-router.post("/", checkoutThriftOrder);
-router.post("/checkout", checkoutThriftOrder);
+router.post("/", validateCheckoutThriftOrder, checkoutThriftOrder);
+router.post("/checkout", validateCheckoutThriftOrder, checkoutThriftOrder);
 
 // Xem danh sách đơn của người mua
 router.get("/my-orders", getMyThriftOrders);
@@ -36,6 +40,11 @@ router.post("/:id/pay", lockAndMarkOrderPaid);
 router.post("/:id/cancel", cancelThriftOrder);
 
 // Cập nhật trạng thái xử lý/vận chuyển đơn hàng (Shop Owner / Admin)
-router.patch("/:id/status", authorize(["SHOP_OWNER", "ADMIN"]), updateThriftOrderStatus);
+router.patch(
+  "/:id/status",
+  authorize(["SHOP_OWNER", "ADMIN"]),
+  validateUpdateThriftOrderStatus,
+  updateThriftOrderStatus
+);
 
 export default router;
