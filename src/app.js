@@ -8,11 +8,20 @@ import errorMiddleware from "./middleware/error.middleware.js";
 
 const app = express();
 
+app.set("etag", false);
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
+
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
 
 app.use("/", routes);
 
