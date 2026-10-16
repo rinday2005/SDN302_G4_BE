@@ -55,13 +55,32 @@ export const updateProfile = async (userId, data) => {
     allowedFields.avatarUrl = data.avatarUrl.trim();
   }
 
-  if (data.address && typeof data.address === "object") {
-    allowedFields.address = {
-      province: data.address.province || "",
-      district: data.address.district || "",
-      ward: data.address.ward || "",
-      detail: data.address.detail || "",
-    };
+  if (data.address) {
+    if (typeof data.address === "object") {
+      allowedFields.address = {
+        province: data.address.province || "",
+        district: data.address.district || "",
+        ward: data.address.ward || "",
+        detail: data.address.detail || "",
+      };
+    } else if (typeof data.address === "string" && data.address.trim()) {
+      const parts = data.address.split(",").map((s) => s.trim());
+      if (parts.length >= 4) {
+        allowedFields.address = {
+          detail: parts[0] || "",
+          ward: parts[1] || "",
+          district: parts[2] || "",
+          province: parts.slice(3).join(", ") || "",
+        };
+      } else {
+        allowedFields.address = {
+          province: "",
+          district: "",
+          ward: "",
+          detail: data.address.trim(),
+        };
+      }
+    }
   }
 
   const updatedUser = await User.findByIdAndUpdate(

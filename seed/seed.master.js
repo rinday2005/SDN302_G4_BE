@@ -16,26 +16,20 @@ const seedCategories = async () => {
       isActive: true,
     },
     {
-      name: "Thời trang",
-      slug: "fashion",
-      type: "BOTH",
-      isActive: true,
-    },
-    {
       name: "Giày dép",
       slug: "shoes",
       type: "BOTH",
       isActive: true,
     },
     {
-      name: "Cắm trại & Dã ngoại",
-      slug: "camping",
+      name: "Đầm dự tiệc",
+      slug: "dam-du-tiec",
       type: "RENT",
       isActive: true,
     },
     {
-      name: "Điện tử & Âm thanh",
-      slug: "electronics",
+      name: "Quần áo",
+      slug: "clothing",
       type: "BOTH",
       isActive: true,
     },
@@ -333,9 +327,16 @@ const seedProducts = async (categories) => {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)+/g, "");
 
-  // 2. Seed vào cả rentalProducts (AC Model) và products (Collection legacy / Compass view)
+  // 2. Dọn dẹp collection products legacy nếu có
+  try {
+    await mongoose.connection.db.collection("products").drop();
+  } catch {
+    // ignore
+  }
+
+  // 3. Seed vào rentalProducts (AC Model)
   for (const item of sampleProducts) {
-    const rentalDoc = await Product.findOneAndUpdate(
+    await Product.findOneAndUpdate(
       { name: item.name },
       item,
       {
@@ -344,37 +345,9 @@ const seedProducts = async (categories) => {
         setDefaultsOnInsert: true,
       }
     );
-
-    const slug = slugify(item.name);
-    await productsCollection.deleteOne({ name: item.name });
-    await productsCollection.insertOne({
-      _id: rentalDoc._id,
-      name: item.name,
-      slug,
-      description: item.description,
-      category: item.categoryId,
-      categoryId: item.categoryId,
-      ownerId: shopOwner._id,
-      pricePerDay: item.pricePerDay,
-      deposit: item.depositAmount,
-      depositAmount: item.depositAmount,
-      totalQuantity: item.totalQuantity,
-      stock: item.totalQuantity,
-      condition: item.condition,
-      rentalRules: item.rentalRules,
-      location: item.location,
-      status: item.status,
-      isActive: true,
-      type: "RENT",
-      images: item.images,
-      sizes: ["S", "M", "L", "FreeSize"],
-      thriftPrice: 0,
-      createdAt: rentalDoc.createdAt || new Date(),
-      updatedAt: rentalDoc.updatedAt || new Date(),
-    });
   }
 
-  console.log("8 Marketplace products seeded into MongoDB both rentalProducts and products collections");
+  console.log("8 Marketplace products seeded into MongoDB rentalProducts collection");
 };
 
 const runSeed = async () => {

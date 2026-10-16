@@ -21,7 +21,7 @@ const createError = (message, statusCode, errorCode) => {
 };
 
 /**
- * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox (hỗ trợ cả đơn DB lẫn đơn tĩnh)
+ * [BE-S3-04] Táº¡o URL thanh toÃ¡n VNPay Sandbox (há»— trá»£ cáº£ Ä‘Æ¡n DB láº«n Ä‘Æ¡n tÄ©nh)
  */
 const createVnPayPaymentUrl = async ({
   user,
@@ -44,12 +44,12 @@ const createVnPayPaymentUrl = async ({
   let payAmount = amount ? Number(amount) : null;
   let code = orderCode || `RH_${Date.now().toString().slice(-6)}`;
 
-  // 1. Nếu có orderId hợp lệ, thử tìm trong MongoDB
+  // 1. Náº¿u cÃ³ orderId há»£p lá»‡, thá»­ tÃ¬m trong MongoDB
   if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
     order = await RentalOrder.findById(orderId);
   }
 
-  // Nếu chưa tìm thấy bằng orderId, thử tìm bằng orderCode nếu có
+  // Náº¿u chÆ°a tÃ¬m tháº¥y báº±ng orderId, thá»­ tÃ¬m báº±ng orderCode náº¿u cÃ³
   if (!order && orderCode) {
     order = await RentalOrder.findOne({ orderCode });
   }
@@ -63,7 +63,7 @@ const createVnPayPaymentUrl = async ({
         }
         return {
           productId: pId,
-          productName: it.productName || it.title || `Sản phẩm (${code})`,
+          productName: it.productName || it.title || `Sáº£n pháº©m (${code})`,
           quantity: Math.max(1, Number(it.quantity || it.qty || 1)),
           pricePerDay: Number(it.pricePerDay || it.dailyPrice || it.price || 0),
           depositAmount: Number(it.depositAmount || it.deposit || 0),
@@ -74,22 +74,22 @@ const createVnPayPaymentUrl = async ({
     return null;
   };
 
-  // 2. Nếu tìm thấy đơn hàng trong DB -> dùng thông tin từ DB (hoặc bổ sung items nếu đơn cũ là dummy)
+  // 2. Náº¿u tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng trong DB -> dÃ¹ng thÃ´ng tin tá»« DB (hoáº·c bá»• sung items náº¿u Ä‘Æ¡n cÅ© lÃ  dummy)
   if (order) {
     if (order.renterId.toString() !== user._id.toString()) {
-      throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
+      throw createError("Báº¡n khÃ´ng cÃ³ quyá»n thanh toÃ¡n Ä‘Æ¡n hÃ ng nÃ y", 403, "FORBIDDEN");
     }
     const parsed = parseOrderItems(items);
-    if (parsed && (order.items.length === 0 || order.items[0]?.productName?.includes("Đơn hàng"))) {
+    if (parsed && (order.items.length === 0 || order.items[0]?.productName?.includes("ÄÆ¡n hÃ ng"))) {
       order.items = parsed;
       if (shippingAddress) {
         order.shippingAddress = {
-          recipientName: (shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "Khách hàng").trim(),
+          recipientName: (shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "KhÃ¡ch hÃ ng").trim(),
           recipientPhone: (shippingAddress.recipientPhone || order.shippingAddress?.recipientPhone || user.phoneNumber || "0988776655").trim(),
-          province: (shippingAddress.province || order.shippingAddress?.province || "Hồ Chí Minh").trim(),
-          district: (shippingAddress.district || order.shippingAddress?.district || "Quận 1").trim(),
-          ward: (shippingAddress.ward || order.shippingAddress?.ward || "Bến Nghé").trim(),
-          detail: (shippingAddress.detail || order.shippingAddress?.detail || "Địa chỉ mặc định").trim(),
+          province: (shippingAddress.province || order.shippingAddress?.province || "Há»“ ChÃ­ Minh").trim(),
+          district: (shippingAddress.district || order.shippingAddress?.district || "Quáº­n 1").trim(),
+          ward: (shippingAddress.ward || order.shippingAddress?.ward || "Báº¿n NghÃ©").trim(),
+          detail: (shippingAddress.detail || order.shippingAddress?.detail || "Äá»‹a chá»‰ máº·c Ä‘á»‹nh").trim(),
         };
       }
       await order.save();
@@ -97,7 +97,7 @@ const createVnPayPaymentUrl = async ({
     payAmount = order.totalAmount;
     code = order.orderCode;
   } else {
-    // 3. Nếu chưa có đơn trong DB -> Tự tạo 1 RentalOrder hợp lệ trong MongoDB gắn với user đang đăng nhập
+    // 3. Náº¿u chÆ°a cÃ³ Ä‘Æ¡n trong DB -> Tá»± táº¡o 1 RentalOrder há»£p lá»‡ trong MongoDB gáº¯n vá»›i user Ä‘ang Ä‘Äƒng nháº­p
     payAmount = payAmount || 1500000;
 
     let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
@@ -117,7 +117,7 @@ const createVnPayPaymentUrl = async ({
     const parsedItems = parseOrderItems(items) || [
       {
         productId: new mongoose.Types.ObjectId(),
-        productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
+        productName: `ÄÆ¡n hÃ ng ${type === "THRIFT" ? "Thrift" : "ThuÃª"} (${code})`,
         quantity: 1,
         pricePerDay: payAmount,
         depositAmount: 0,
@@ -132,12 +132,12 @@ const createVnPayPaymentUrl = async ({
 
     const shipAddr = shippingAddress || {};
     const effectiveAddress = {
-      recipientName: (shipAddr.recipientName || user.fullName || "Khách hàng").trim(),
+      recipientName: (shipAddr.recipientName || user.fullName || "KhÃ¡ch hÃ ng").trim(),
       recipientPhone: (shipAddr.recipientPhone || user.phoneNumber || "0988776655").trim(),
-      province: (shipAddr.province || user.address?.province || "Hồ Chí Minh").trim(),
-      district: (shipAddr.district || user.address?.district || "Quận 1").trim(),
-      ward: (shipAddr.ward || user.address?.ward || "Bến Nghé").trim(),
-      detail: (shipAddr.detail || user.address?.detail || "Địa chỉ mặc định").trim(),
+      province: (shipAddr.province || user.address?.province || "Há»“ ChÃ­ Minh").trim(),
+      district: (shipAddr.district || user.address?.district || "Quáº­n 1").trim(),
+      ward: (shipAddr.ward || user.address?.ward || "Báº¿n NghÃ©").trim(),
+      detail: (shipAddr.detail || user.address?.detail || "Äá»‹a chá»‰ máº·c Ä‘á»‹nh").trim(),
     };
 
     order = await RentalOrder.create({
@@ -157,11 +157,11 @@ const createVnPayPaymentUrl = async ({
     });
   }
 
-  // 4. Sinh mã giao dịch duy nhất cho phiên thanh toán
+  // 4. Sinh mÃ£ giao dá»‹ch duy nháº¥t cho phiÃªn thanh toÃ¡n
   const txnRef = `${code}_${Date.now()}`;
   const description = `Thanh toan don ${type.toLowerCase()} ${code}`;
 
-  // 5. Lưu payment record trạng thái PENDING
+  // 5. LÆ°u payment record tráº¡ng thÃ¡i PENDING
   await Payment.create({
     orderId: order._id,
     orderType: type,
@@ -173,7 +173,7 @@ const createVnPayPaymentUrl = async ({
     description,
   });
 
-  // 6. Tạo VNPay Payment URL (Sandbox)
+  // 6. Táº¡o VNPay Payment URL (Sandbox)
   const effectiveReturnUrl = returnUrl || VNPAY_RETURN_URL;
   const paymentUrl = buildVnPayUrl({
     tmnCode: VNPAY_TMN_CODE,
@@ -198,10 +198,10 @@ const createVnPayPaymentUrl = async ({
 };
 
 /**
- * [BE-S3-05] Xử lý Webhook IPN từ VNPay (Server-to-Server)
+ * [BE-S3-05] Xá»­ lÃ½ Webhook IPN tá»« VNPay (Server-to-Server)
  */
 const processVnPayIpn = async (queryParams = {}) => {
-  // 1. AC: Xác minh chữ ký VNPay (checksum SHA512)
+  // 1. AC: XÃ¡c minh chá»¯ kÃ½ VNPay (checksum SHA512)
   const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
   if (!isValidSignature) {
     return { RspCode: "97", Message: "Invalid Checksum" };
@@ -212,15 +212,15 @@ const processVnPayIpn = async (queryParams = {}) => {
   const responseCode = queryParams.vnp_ResponseCode;
   const transactionStatus = queryParams.vnp_TransactionStatus;
 
-  // 2. Tìm payment record theo txnRef
+  // 2. TÃ¬m payment record theo txnRef
   let payment = await Payment.findOne({ txnRef });
 
-  // 3. Tìm RentalOrder
+  // 3. TÃ¬m RentalOrder
   let order = null;
   if (payment) {
     order = await RentalOrder.findById(payment.orderId);
   } else {
-    // Fallback: tìm qua orderCode trong txnRef
+    // Fallback: tÃ¬m qua orderCode trong txnRef
     const orderCode = txnRef?.split("_")[0];
     if (orderCode) {
       order = await RentalOrder.findOne({ orderCode });
@@ -231,12 +231,12 @@ const processVnPayIpn = async (queryParams = {}) => {
     return { RspCode: "01", Message: "Order not found" };
   }
 
-  // 4. AC: Kiểm tra số tiền
+  // 4. AC: Kiá»ƒm tra sá»‘ tiá»n
   if (Math.round(order.totalAmount) !== Math.round(vnpAmount)) {
     return { RspCode: "04", Message: "Invalid amount" };
   }
 
-  // 5. AC: Không tạo duplicate payment record / không xử lý đơn đã confirm
+  // 5. AC: KhÃ´ng táº¡o duplicate payment record / khÃ´ng xá»­ lÃ½ Ä‘Æ¡n Ä‘Ã£ confirm
   if (
     (payment && payment.status === "PAID") ||
     order.status === RENTAL_ORDER_STATUS.PAID ||
@@ -245,12 +245,12 @@ const processVnPayIpn = async (queryParams = {}) => {
     return { RspCode: "02", Message: "Order already confirmed" };
   }
 
-  // 6. Kiểm tra mã phản hồi giao dịch
+  // 6. Kiá»ƒm tra mÃ£ pháº£n há»“i giao dá»‹ch
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // AC: Thanh toán thành công -> cập nhật RentalOrder thành PAID
-    order.status = RENTAL_ORDER_STATUS.PAID;
+    // AC: Thanh toÃ¡n thÃ nh cÃ´ng -> cáº­p nháº­t RentalOrder thÃ nh PAID
+    order.status = RENTAL_ORDER_STATUS.DELIVERED; if (!order.shippingDetails) { order.shippingDetails = {}; } order.shippingDetails.deliveredAt = new Date(); order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
     order.paymentStatus = "PAID";
 
     if (payment) {
@@ -279,7 +279,7 @@ const processVnPayIpn = async (queryParams = {}) => {
     await order.save();
     return { RspCode: "00", Message: "Confirm Success" };
   } else {
-    // Thanh toán thất bại hoặc khách hủy
+    // Thanh toÃ¡n tháº¥t báº¡i hoáº·c khÃ¡ch há»§y
     order.paymentStatus = "FAILED";
     if (payment) {
       payment.status = "FAILED";
@@ -293,17 +293,17 @@ const processVnPayIpn = async (queryParams = {}) => {
 };
 
 /**
- * [BE-S3-05] Xử lý Return URL từ VNPay (Browser callback sau thanh toán)
+ * [BE-S3-05] Xá»­ lÃ½ Return URL tá»« VNPay (Browser callback sau thanh toÃ¡n)
  */
 const processVnPayReturn = async (queryParams = {}) => {
-  // 1. AC: Xác minh chữ ký
+  // 1. AC: XÃ¡c minh chá»¯ kÃ½
   const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
   if (!isValidSignature) {
     return {
       success: false,
       status: "FAILED",
       responseCode: "97",
-      message: "Chữ ký VNPay không hợp lệ (Invalid Checksum)",
+      message: "Chá»¯ kÃ½ VNPay khÃ´ng há»£p lá»‡ (Invalid Checksum)",
     };
   }
 
@@ -329,11 +329,11 @@ const processVnPayReturn = async (queryParams = {}) => {
       success: false,
       status: "FAILED",
       responseCode: "01",
-      message: "Không tìm thấy đơn hàng",
+      message: "KhÃ´ng tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng",
     };
   }
 
-  // 2. AC: Kiểm tra số tiền
+  // 2. AC: Kiá»ƒm tra sá»‘ tiá»n
   if (Math.round(order.totalAmount) !== Math.round(vnpAmount)) {
     return {
       success: false,
@@ -341,16 +341,16 @@ const processVnPayReturn = async (queryParams = {}) => {
       orderCode: order.orderCode,
       status: "FAILED",
       responseCode: "04",
-      message: "Số tiền thanh toán không khớp với đơn hàng",
+      message: "Sá»‘ tiá»n thanh toÃ¡n khÃ´ng khá»›p vá»›i Ä‘Æ¡n hÃ ng",
     };
   }
 
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // Đảm bảo đơn được cập nhật PAID nếu IPN chưa xử lý kịp
+    // Äáº£m báº£o Ä‘Æ¡n Ä‘Æ°á»£c cáº­p nháº­t PAID náº¿u IPN chÆ°a xá»­ lÃ½ ká»‹p
     if (order.status !== RENTAL_ORDER_STATUS.PAID) {
-      order.status = RENTAL_ORDER_STATUS.PAID;
+      order.status = RENTAL_ORDER_STATUS.DELIVERED; if (!order.shippingDetails) { order.shippingDetails = {}; } order.shippingDetails.deliveredAt = new Date(); order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
       order.paymentStatus = "PAID";
       await order.save();
     }
@@ -371,7 +371,7 @@ const processVnPayReturn = async (queryParams = {}) => {
       totalAmount: order.totalAmount,
       transactionNo: queryParams.vnp_TransactionNo || "",
       status: "PAID",
-      message: "Thanh toán thành công",
+      message: "Thanh toÃ¡n thÃ nh cÃ´ng",
     };
   } else {
     if (payment && payment.status === "PENDING") {
@@ -389,7 +389,7 @@ const processVnPayReturn = async (queryParams = {}) => {
       totalAmount: order.totalAmount,
       status: "FAILED",
       responseCode,
-      message: "Thanh toán không thành công hoặc người dùng đã hủy giao dịch",
+      message: "Thanh toÃ¡n khÃ´ng thÃ nh cÃ´ng hoáº·c ngÆ°á»i dÃ¹ng Ä‘Ã£ há»§y giao dá»‹ch",
     };
   }
 };
