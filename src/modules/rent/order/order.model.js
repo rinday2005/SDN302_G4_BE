@@ -79,6 +79,11 @@ const rentalOrderItemSchema = new mongoose.Schema(
       min: [0, "depositAmount phải lớn hơn hoặc bằng 0"],
       default: 0,
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { _id: false }
 );
@@ -131,6 +136,27 @@ const shippingDetailsSchema = new mongoose.Schema(
     returnTrackingCode: { type: String, trim: true, default: "" },
     returnShippedAt: { type: Date, default: null },
     returnedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+// Minh chứng bàn giao CLA (Nhật ký mở hộp & đối kiểm 3 góc của khách khi nhận đồ)
+const claProofSchema = new mongoose.Schema(
+  {
+    isSigned: { type: Boolean, default: false },
+    signedAt: { type: Date, default: null },
+    signerName: { type: String, trim: true, default: "" },
+    signerPhone: { type: String, trim: true, default: "" },
+    note: { type: String, trim: true, default: "" },
+    photos: {
+      slot1: { type: String, default: "" }, // Mặt trước & Tổng thể
+      slot2: { type: String, default: "" }, // Góc cạnh & Phụ kiện
+      slot3: { type: String, default: "" }, // Tem niêm phong Nanuk
+    },
+    images: {
+      type: [String],
+      default: [],
+    },
   },
   { _id: false }
 );
@@ -334,6 +360,10 @@ const rentalOrderSchema = new mongoose.Schema(
     shippingDetails: {
       type: shippingDetailsSchema,
       default: () => ({}),
+    },
+    claProof: {
+      type: claProofSchema,
+      default: null,
     },
     returnRequest: {
       type: returnRequestSchema,

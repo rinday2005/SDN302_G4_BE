@@ -52,10 +52,19 @@ router.post(
   handoverOrderController
 );
 
-// [BE-S3-07] Renter xác nhận đã nhận đồ & bắt đầu tính thời gian thuê
+// [BE-S3-07] Renter xác nhận đã nhận đồ & ký biên bản bàn giao CLA đối kiểm 3 góc
 router.post(
   "/:id/confirm-received",
   authorize(["USER"]),
+  upload.any(),
+  confirmReceivedOrderController
+);
+
+// Alias cho việc ký và cập nhật biên bản bàn giao CLA
+router.post(
+  "/:id/cla-proof",
+  authorize(["USER"]),
+  upload.any(),
   confirmReceivedOrderController
 );
 

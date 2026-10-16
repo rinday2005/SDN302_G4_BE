@@ -30,6 +30,13 @@ const createVnPayUrlController = async (req, res, next) => {
       ipAddress,
       returnUrl: req.body.returnUrl,
       bankCode: req.body.bankCode,
+      items: req.body.items,
+      shippingAddress: req.body.shippingAddress,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      rentalFee: req.body.rentalFee,
+      depositAmount: req.body.depositAmount,
+      shippingFee: req.body.shippingFee,
     });
 
     // Trả về vnpUrl trực tiếp và trong data để tương thích hoàn toàn với FE

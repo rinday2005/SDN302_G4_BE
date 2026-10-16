@@ -440,7 +440,7 @@ const handoverOrder = async (
  * Chỉ renterId của order mới được xác nhận
  * Chuyển trạng thái sang RENTING và lưu timestamp receivedAt
  */
-const confirmReceivedOrder = async (orderId, user) => {
+const confirmReceivedOrder = async (orderId, user, payload = {}) => {
   assertValidOrderId(orderId);
 
   const order = await RentalOrder.findById(orderId);
@@ -462,6 +462,7 @@ const confirmReceivedOrder = async (orderId, user) => {
     RENTAL_ORDER_STATUS.HANDED_OVER,
     RENTAL_ORDER_STATUS.SHIPPING,
     RENTAL_ORDER_STATUS.DELIVERED,
+    RENTAL_ORDER_STATUS.RENTING,
   ];
 
   if (!validCurrentStatuses.includes(order.status)) {
@@ -472,13 +473,49 @@ const confirmReceivedOrder = async (orderId, user) => {
     );
   }
 
-  const receivedTimestamp = new Date();
+  const receivedTimestamp = order.receivedAt || new Date();
 
   // AC: lưu timestamp xác nhận (bắt đầu tính thời gian thuê thực tế)
   order.receivedAt = receivedTimestamp;
   if (order.shippingDetails) {
     order.shippingDetails.deliveredAt = order.shippingDetails.deliveredAt || receivedTimestamp;
   }
+
+  // Lưu biên bản bàn giao CLA và nhật ký đối kiểm 3 góc
+  const {
+    photos = {},
+    images = [],
+    note = "",
+    signerName = "",
+    signerPhone = "",
+  } = payload;
+
+  const slot1 = photos?.slot1 || images[0] || (order.claProof?.photos?.slot1 || "");
+  const slot2 = photos?.slot2 || images[1] || (order.claProof?.photos?.slot2 || "");
+  const slot3 = photos?.slot3 || images[2] || (order.claProof?.photos?.slot3 || "");
+  const combinedImages = images.length > 0 ? images : [slot1, slot2, slot3].filter(Boolean);
+
+  order.claProof = {
+    isSigned: true,
+    signedAt: receivedTimestamp,
+    signerName:
+      signerName.trim() ||
+      order.shippingAddress?.recipientName ||
+      user.fullName ||
+      "Khách hàng",
+    signerPhone:
+      signerPhone.trim() ||
+      order.shippingAddress?.recipientPhone ||
+      user.phoneNumber ||
+      "",
+    note: (note || order.claProof?.note || "").trim(),
+    photos: {
+      slot1,
+      slot2,
+      slot3,
+    },
+    images: combinedImages,
+  };
 
   // AC: order chuyển sang RENTING
   order.status = RENTAL_ORDER_STATUS.RENTING;
