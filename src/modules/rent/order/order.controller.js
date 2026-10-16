@@ -120,25 +120,11 @@ const handoverOrderController = async (req, res, next) => {
   }
 };
 
-const confirmReceivedOrderController = async (req, res, next) => {
-  try {
-    const order = await confirmReceivedOrder(req.params.id, req.user);
-
-    return successResponse(
-      res,
-      "Order confirmed received successfully. Rental period has started.",
-      order
-    );
-  } catch (error) {
-    next(error);
-  }
-};
-
-const uploadBufferToCloudinary = (buffer) => {
+const uploadBufferToCloudinary = (buffer, folder = "reuse_hub/cla_proofs") => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
-        folder: "reuse_hub/returns",
+        folder,
         resource_type: "image",
       },
       (error, result) => {
@@ -148,6 +134,62 @@ const uploadBufferToCloudinary = (buffer) => {
     );
     stream.end(buffer);
   });
+};
+
+const confirmReceivedOrderController = async (req, res, next) => {
+  try {
+    let images = [];
+    const photos = {
+      slot1: req.body?.photos?.slot1 || req.body?.slot1 || "",
+      slot2: req.body?.photos?.slot2 || req.body?.slot2 || "",
+      slot3: req.body?.photos?.slot3 || req.body?.slot3 || "",
+    };
+
+    // 1. Nếu có file upload từ multipart/form-data
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      for (const file of req.files) {
+        const uploadedUrl = await uploadBufferToCloudinary(file.buffer, "reuse_hub/cla_proofs");
+        images.push(uploadedUrl);
+        if (file.fieldname === "slot1" || file.fieldname === "photos[slot1]") photos.slot1 = uploadedUrl;
+        else if (file.fieldname === "slot2" || file.fieldname === "photos[slot2]") photos.slot2 = uploadedUrl;
+        else if (file.fieldname === "slot3" || file.fieldname === "photos[slot3]") photos.slot3 = uploadedUrl;
+      }
+    } else if (req.file) {
+      const uploadedUrl = await uploadBufferToCloudinary(req.file.buffer, "reuse_hub/cla_proofs");
+      images.push(uploadedUrl);
+    }
+
+    // 2. Nếu có mảng ảnh hoặc ảnh string truyền trong body
+    if (req.body?.images) {
+      if (Array.isArray(req.body.images)) {
+        images.push(...req.body.images);
+      } else if (typeof req.body.images === "string") {
+        images.push(req.body.images);
+      }
+    }
+
+    const payload = {
+      photos: {
+        slot1: photos.slot1 || (images[0] || ""),
+        slot2: photos.slot2 || (images[1] || ""),
+        slot3: photos.slot3 || (images[2] || ""),
+      },
+      images,
+      note: req.body?.note || "",
+      signerName: req.body?.signerName || "",
+      signerPhone: req.body?.signerPhone || "",
+    };
+
+    const order = await confirmReceivedOrder(req.params.id, req.user, payload);
+
+    return successResponse(
+      res,
+      "Biên bản bàn giao CLA và xác nhận nhận hàng đã được lưu thành công. Bắt đầu thời gian thuê.",
+      order
+    );
+  } catch (error) {
+    next(error);
+  }
 };
 
 const requestReturnOrderController = async (req, res, next) => {

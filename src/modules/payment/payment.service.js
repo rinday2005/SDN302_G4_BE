@@ -32,6 +32,13 @@ const createVnPayPaymentUrl = async ({
   ipAddress = "127.0.0.1",
   returnUrl,
   bankCode,
+  items,
+  shippingAddress,
+  startDate,
+  endDate,
+  rentalFee,
+  depositAmount,
+  shippingFee,
 }) => {
   let order = null;
   let payAmount = amount ? Number(amount) : null;
@@ -47,18 +54,52 @@ const createVnPayPaymentUrl = async ({
     order = await RentalOrder.findOne({ orderCode });
   }
 
-  // 2. Nếu tìm thấy đơn hàng trong DB -> dùng thông tin từ DB
+  const parseOrderItems = (rawItems) => {
+    if (Array.isArray(rawItems) && rawItems.length > 0) {
+      return rawItems.map((it) => {
+        let pId = it.productId || it.id;
+        if (!pId || !mongoose.Types.ObjectId.isValid(pId)) {
+          pId = new mongoose.Types.ObjectId();
+        }
+        return {
+          productId: pId,
+          productName: it.productName || it.title || `Sản phẩm (${code})`,
+          quantity: Math.max(1, Number(it.quantity || it.qty || 1)),
+          pricePerDay: Number(it.pricePerDay || it.dailyPrice || it.price || 0),
+          depositAmount: Number(it.depositAmount || it.deposit || 0),
+          imageUrl: it.imageUrl || it.image || "",
+        };
+      });
+    }
+    return null;
+  };
+
+  // 2. Nếu tìm thấy đơn hàng trong DB -> dùng thông tin từ DB (hoặc bổ sung items nếu đơn cũ là dummy)
   if (order) {
     if (order.renterId.toString() !== user._id.toString()) {
       throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
     }
+    const parsed = parseOrderItems(items);
+    if (parsed && (order.items.length === 0 || order.items[0]?.productName?.includes("Đơn hàng"))) {
+      order.items = parsed;
+      if (shippingAddress) {
+        order.shippingAddress = {
+          recipientName: (shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "Khách hàng").trim(),
+          recipientPhone: (shippingAddress.recipientPhone || order.shippingAddress?.recipientPhone || user.phoneNumber || "0988776655").trim(),
+          province: (shippingAddress.province || order.shippingAddress?.province || "Hồ Chí Minh").trim(),
+          district: (shippingAddress.district || order.shippingAddress?.district || "Quận 1").trim(),
+          ward: (shippingAddress.ward || order.shippingAddress?.ward || "Bến Nghé").trim(),
+          detail: (shippingAddress.detail || order.shippingAddress?.detail || "Địa chỉ mặc định").trim(),
+        };
+      }
+      await order.save();
+    }
     payAmount = order.totalAmount;
     code = order.orderCode;
   } else {
-    // 3. Nếu chưa có đơn trong DB (data tĩnh từ FE) -> Tự tạo 1 RentalOrder tạm hợp lệ trong MongoDB gắn với user đang đăng nhập
+    // 3. Nếu chưa có đơn trong DB -> Tự tạo 1 RentalOrder hợp lệ trong MongoDB gắn với user đang đăng nhập
     payAmount = payAmount || 1500000;
 
-    // Tìm Shop Owner có sẵn trong DB hoặc fallback tạo
     let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
     if (!shopOwner) {
       shopOwner = await User.create({
@@ -70,37 +111,47 @@ const createVnPayPaymentUrl = async ({
       });
     }
 
-    const now = new Date();
-    const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const dummyProductId = new mongoose.Types.ObjectId();
+    const now = startDate ? new Date(startDate) : new Date();
+    const nextDay = endDate ? new Date(endDate) : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const parsedItems = parseOrderItems(items) || [
+      {
+        productId: new mongoose.Types.ObjectId(),
+        productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
+        quantity: 1,
+        pricePerDay: payAmount,
+        depositAmount: 0,
+        imageUrl: "",
+      },
+    ];
+
+    const calcRentalFee = rentalFee !== undefined ? Number(rentalFee) : payAmount;
+    const calcDepositAmount = depositAmount !== undefined ? Number(depositAmount) : 0;
+    const calcShippingFee = shippingFee !== undefined ? Number(shippingFee) : 0;
+    const finalTotal = payAmount || (calcRentalFee + calcDepositAmount + calcShippingFee);
+
+    const shipAddr = shippingAddress || {};
+    const effectiveAddress = {
+      recipientName: (shipAddr.recipientName || user.fullName || "Khách hàng").trim(),
+      recipientPhone: (shipAddr.recipientPhone || user.phoneNumber || "0988776655").trim(),
+      province: (shipAddr.province || user.address?.province || "Hồ Chí Minh").trim(),
+      district: (shipAddr.district || user.address?.district || "Quận 1").trim(),
+      ward: (shipAddr.ward || user.address?.ward || "Bến Nghé").trim(),
+      detail: (shipAddr.detail || user.address?.detail || "Địa chỉ mặc định").trim(),
+    };
 
     order = await RentalOrder.create({
       orderCode: code,
       renterId: user._id,
       shopOwnerId: shopOwner._id,
-      items: [
-        {
-          productId: dummyProductId,
-          productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
-          quantity: 1,
-          pricePerDay: payAmount,
-          depositAmount: 0,
-        },
-      ],
+      items: parsedItems,
       startDate: now,
       endDate: nextDay,
-      rentalFee: payAmount,
-      depositAmount: 0,
-      shippingFee: 0,
-      totalAmount: payAmount,
-      shippingAddress: {
-        recipientName: user.fullName || "Khách hàng",
-        recipientPhone: user.phoneNumber || "0988776655",
-        province: user.address?.province || "Hồ Chí Minh",
-        district: user.address?.district || "Quận 1",
-        ward: user.address?.ward || "Bến Nghé",
-        detail: user.address?.detail || "Địa chỉ mặc định",
-      },
+      rentalFee: calcRentalFee,
+      depositAmount: calcDepositAmount,
+      shippingFee: calcShippingFee,
+      totalAmount: finalTotal,
+      shippingAddress: effectiveAddress,
       status: "WAITING_PAYMENT",
       paymentStatus: "PENDING",
     });
