@@ -1,5 +1,6 @@
 import RentalProduct from "../product/rentalProduct.model.js";
 import RentalOrder from "../order/order.model.js";
+import RentalAvailability from "./availability.model.js";
 import { isDateOverlap } from "./availability.utils.js";
 
 /**
@@ -13,7 +14,7 @@ export const checkRentalAvailability = async (
   productId,
   startDate,
   endDate,
-  requestedQty
+  requestedQty = 1
 ) => {
   const reqStart = new Date(startDate);
   const reqEnd = new Date(endDate);
@@ -50,7 +51,7 @@ export const checkRentalAvailability = async (
   }
 
   // 2. Tìm tất cả đơn hàng chứa sản phẩm này và đang chiếm giữ tồn kho
-  // AC: Loại bỏ các đơn REJECTED, CANCELLED (và COMPLETED)
+  // Loại bỏ các đơn REJECTED, CANCELLED và COMPLETED
   const activeOrders = await RentalOrder.find({
     status: { $nin: ["REJECTED", "CANCELLED", "COMPLETED"] },
     "items.productId": productId,
@@ -60,21 +61,30 @@ export const checkRentalAvailability = async (
   let totalBookedQty = 0;
 
   for (const order of activeOrders) {
-    // Kiểm tra overlap giữa khoảng thời gian khách muốn thuê và thời gian của order cũ
     if (isDateOverlap(reqStart, reqEnd, order.startDate, order.endDate)) {
-      // Vì 1 đơn hàng có thể có nhiều items, lọc đúng item của productId này
       for (const item of order.items) {
         if (item.productId.toString() === productId.toString()) {
-          totalBookedQty += item.quantity;
+          totalBookedQty += item.quantity || 1;
         }
       }
     }
   }
 
-  // 4. Tính tồn kho khả dụng
-  const availableQty = product.totalQuantity - totalBookedQty;
+  // 3.1. Tính thêm các khoảng thời gian bị shop owner khóa thủ công (bảo trì/kiểm định)
+  const manualBlocks = await RentalAvailability.find({
+    productId,
+  });
+  for (const block of manualBlocks) {
+    if (isDateOverlap(reqStart, reqEnd, block.startDate, block.endDate)) {
+      totalBookedQty += block.blockedQuantity || 1;
+    }
+  }
 
-  // 5. AC: Nếu số lượng yêu cầu lớn hơn tồn kho khả dụng -> ném lỗi 409
+  // 4. Tính tồn kho khả dụng
+  const totalStock = product.totalQuantity || product.stockQuantity || 1;
+  const availableQty = totalStock - totalBookedQty;
+
+  // 5. Nếu số lượng yêu cầu lớn hơn tồn kho khả dụng -> ném lỗi 409
   if (requestedQty > availableQty) {
     const error = new Error(
       `Sản phẩm không đủ số lượng khả dụng trong khoảng thời gian này (Còn lại: ${Math.max(
@@ -89,8 +99,95 @@ export const checkRentalAvailability = async (
 
   return {
     isAvailable: true,
-    totalQuantity: product.totalQuantity,
+    productId,
+    startDate: reqStart.toISOString(),
+    endDate: reqEnd.toISOString(),
+    totalQuantity: totalStock,
     bookedQuantity: totalBookedQty,
     availableQuantity: availableQty,
   };
+};
+
+/**
+ * Lấy danh sách các khoảng thời gian đã được đặt hoặc bị khóa của một sản phẩm
+ * (Dùng cho Calendar DatePicker phía FE hiển thị disable các ngày đã hết đồ)
+ */
+export const getProductBookedDates = async (productId) => {
+  const product = await RentalProduct.findById(productId);
+  if (!product) {
+    const error = new Error("Sản phẩm không tồn tại");
+    error.statusCode = 404;
+    error.errorCode = "PRODUCT_NOT_FOUND";
+    throw error;
+  }
+
+  const activeOrders = await RentalOrder.find({
+    status: { $nin: ["REJECTED", "CANCELLED", "COMPLETED"] },
+    "items.productId": productId,
+  }).select("orderCode startDate endDate items status");
+
+  const manualBlocks = await RentalAvailability.find({ productId });
+
+  const bookedRanges = activeOrders.map((order) => {
+    const targetItem = order.items.find(
+      (i) => i.productId.toString() === productId.toString()
+    );
+    return {
+      orderCode: order.orderCode,
+      startDate: order.startDate,
+      endDate: order.endDate,
+      quantity: targetItem?.quantity || 1,
+      type: "RENTAL_ORDER",
+      status: order.status,
+    };
+  });
+
+  const blockedRanges = manualBlocks.map((block) => ({
+    startDate: block.startDate,
+    endDate: block.endDate,
+    quantity: block.blockedQuantity,
+    type: "MAINTENANCE_BLOCK",
+    reason: block.reason,
+    notes: block.notes,
+  }));
+
+  return {
+    productId,
+    totalQuantity: product.totalQuantity || product.stockQuantity || 1,
+    bookedRanges: [...bookedRanges, ...blockedRanges],
+  };
+};
+
+/**
+ * Shop Owner chủ động khóa ngày bảo trì/kiểm định cho thiết bị
+ */
+export const blockAvailabilityDates = async (user, data) => {
+  const { productId, startDate, endDate, blockedQuantity = 1, reason, notes } = data;
+
+  const product = await RentalProduct.findById(productId);
+  if (!product) {
+    const error = new Error("Sản phẩm không tồn tại");
+    error.statusCode = 404;
+    error.errorCode = "PRODUCT_NOT_FOUND";
+    throw error;
+  }
+
+  if (product.shopOwnerId.toString() !== user._id.toString() && user.role !== "ADMIN") {
+    const error = new Error("Chỉ chủ sở hữu thiết bị mới có quyền khóa lịch bảo dưỡng");
+    error.statusCode = 403;
+    error.errorCode = "FORBIDDEN";
+    throw error;
+  }
+
+  const block = await RentalAvailability.create({
+    productId,
+    shopOwnerId: user._id,
+    startDate: new Date(startDate),
+    endDate: new Date(endDate),
+    blockedQuantity,
+    reason: reason || "MAINTENANCE",
+    notes: notes || "",
+  });
+
+  return block;
 };
