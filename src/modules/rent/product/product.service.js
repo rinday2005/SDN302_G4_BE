@@ -120,6 +120,7 @@ const getPublicProducts = async (query = {}) => {
     minPrice,
     maxPrice,
     province,
+    size,
     page = 1,
     limit = 12,
     sortBy = "newest",
@@ -128,6 +129,14 @@ const getPublicProducts = async (query = {}) => {
   const filter = {
     status: "APPROVED",
   };
+
+  if (size && size !== "ALL" && size !== "all") {
+    const s = size.trim().toUpperCase();
+    filter.$or = [
+      { size: s },
+      { sizes: s },
+    ];
+  }
 
   if (keyword?.trim()) {
     const safeKeyword = escapeRegex(keyword.trim());

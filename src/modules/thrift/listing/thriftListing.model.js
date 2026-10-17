@@ -11,11 +11,25 @@ const thriftListingSchema = new mongoose.Schema(
     sourceType: {
       type: String,
       enum: {
-        values: ['NEW', 'RENTAL_PRODUCT'],
-        message: 'sourceType chỉ nhận NEW (đăng mới) hoặc RENTAL_PRODUCT (chuyển đổi từ đồ thuê)',
+        values: ['NEW', 'RENTAL_PRODUCT', 'USED_DIRECT'],
+        message: 'sourceType không hợp lệ',
       },
       default: 'NEW',
       required: true,
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: [0, 'Số lượng tồn kho không được âm'],
+      default: 10,
+    },
+    sizes: {
+      type: [String],
+      default: ['S', 'M', 'L', 'XL'],
+    },
+    size: {
+      type: String,
+      default: 'L',
     },
     sourceRentalProductId: {
       type: mongoose.Schema.Types.ObjectId,

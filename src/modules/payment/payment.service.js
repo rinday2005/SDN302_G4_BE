@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
+import ThriftOrder from "../thrift/order/thriftOrder.model.js";
+import { createThriftOrderService } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
 import {
   buildVnPayUrl,
@@ -21,7 +23,7 @@ const createError = (message, statusCode, errorCode) => {
 };
 
 /**
- * [BE-S3-04] Táº¡o URL thanh toÃ¡n VNPay Sandbox (há»— trá»£ cáº£ Ä‘Æ¡n DB láº«n Ä‘Æ¡n tÄ©nh)
+ * [BE-S3-04] Tạo URL thanh toán VNPay Sandbox (Hỗ trợ cả RENT và THRIFT)
  */
 const createVnPayPaymentUrl = async ({
   user,
@@ -40,131 +42,164 @@ const createVnPayPaymentUrl = async ({
   depositAmount,
   shippingFee,
 }) => {
-  let order = null;
+  const isThrift = type === "THRIFT" || (orderCode && orderCode.includes("TRF"));
   let payAmount = amount ? Number(amount) : null;
-  let code = orderCode || `RH_${Date.now().toString().slice(-6)}`;
+  let code = orderCode || `${isThrift ? "TRF" : "RH"}_${Date.now().toString().slice(-6)}`;
+  let targetOrderId = null;
 
-  // 1. Náº¿u cÃ³ orderId há»£p lá»‡, thá»­ tÃ¬m trong MongoDB
-  if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
-    order = await RentalOrder.findById(orderId);
-  }
+  if (isThrift) {
+    // ── XỬ LÝ THANH TOÁN CHO ĐƠN THRIFT ──
+    let thriftOrder = null;
 
-  // Náº¿u chÆ°a tÃ¬m tháº¥y báº±ng orderId, thá»­ tÃ¬m báº±ng orderCode náº¿u cÃ³
-  if (!order && orderCode) {
-    order = await RentalOrder.findOne({ orderCode });
-  }
+    if (orderId && mongoose.Types.ObjectId.isValid(orderId)) {
+      thriftOrder = await ThriftOrder.findById(orderId);
+    }
 
-  const parseOrderItems = (rawItems) => {
-    if (Array.isArray(rawItems) && rawItems.length > 0) {
-      return rawItems.map((it) => {
-        let pId = it.productId || it.id;
-        if (!pId || !mongoose.Types.ObjectId.isValid(pId)) {
-          pId = new mongoose.Types.ObjectId();
-        }
-        return {
-          productId: pId,
-          productName: it.productName || it.title || `Sáº£n pháº©m (${code})`,
-          quantity: Math.max(1, Number(it.quantity || it.qty || 1)),
-          pricePerDay: Number(it.pricePerDay || it.dailyPrice || it.price || 0),
-          depositAmount: Number(it.depositAmount || it.deposit || 0),
-          imageUrl: it.imageUrl || it.image || "",
-        };
+    if (!thriftOrder && orderCode) {
+      const cleanCode = orderCode.replace("#", "");
+      thriftOrder = await ThriftOrder.findOne({
+        $or: [{ orderCode }, { orderCode: `#${cleanCode}` }, { orderCode: cleanCode }],
       });
     }
-    return null;
-  };
 
-  // 2. Náº¿u tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng trong DB -> dÃ¹ng thÃ´ng tin tá»« DB (hoáº·c bá»• sung items náº¿u Ä‘Æ¡n cÅ© lÃ  dummy)
-  if (order) {
-    if (order.renterId.toString() !== user._id.toString()) {
-      throw createError("Báº¡n khÃ´ng cÃ³ quyá»n thanh toÃ¡n Ä‘Æ¡n hÃ ng nÃ y", 403, "FORBIDDEN");
+    // Nếu chưa có ThriftOrder trong DB, khởi tạo mới từ các item truyền vào hoặc DB
+    if (!thriftOrder) {
+      thriftOrder = await createThriftOrderService({
+        user,
+        items: Array.isArray(items) ? items : [],
+        shippingAddress,
+      });
     }
-    const parsed = parseOrderItems(items);
-    if (parsed && (order.items.length === 0 || order.items[0]?.productName?.includes("ÄÆ¡n hÃ ng"))) {
-      order.items = parsed;
-      if (shippingAddress) {
-        order.shippingAddress = {
-          recipientName: (shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "KhÃ¡ch hÃ ng").trim(),
-          recipientPhone: (shippingAddress.recipientPhone || order.shippingAddress?.recipientPhone || user.phoneNumber || "0988776655").trim(),
-          province: (shippingAddress.province || order.shippingAddress?.province || "Há»“ ChÃ­ Minh").trim(),
-          district: (shippingAddress.district || order.shippingAddress?.district || "Quáº­n 1").trim(),
-          ward: (shippingAddress.ward || order.shippingAddress?.ward || "Báº¿n NghÃ©").trim(),
-          detail: (shippingAddress.detail || order.shippingAddress?.detail || "Äá»‹a chá»‰ máº·c Ä‘á»‹nh").trim(),
-        };
-      }
-      await order.save();
-    }
-    payAmount = order.totalAmount;
-    code = order.orderCode;
+
+    targetOrderId = thriftOrder._id;
+    payAmount = thriftOrder.totalAmount;
+    code = thriftOrder.orderCode;
   } else {
-    // 3. Náº¿u chÆ°a cÃ³ Ä‘Æ¡n trong DB -> Tá»± táº¡o 1 RentalOrder há»£p lá»‡ trong MongoDB gáº¯n vá»›i user Ä‘ang Ä‘Äƒng nháº­p
-    payAmount = payAmount || 1500000;
+    // ── XỬ LÝ THANH TOÁN CHO ĐƠN RENT ──
+    let order = null;
 
-    let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
-    if (!shopOwner) {
-      shopOwner = await User.create({
-        email: `shop_${Date.now()}@reuse.vn`,
-        passwordHash: "dummyPasswordHash123",
-        fullName: "ReUse Official Shop",
-        phoneNumber: "0901234567",
-        role: "SHOP_OWNER",
-      });
+    if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
+      order = await RentalOrder.findById(orderId);
     }
 
-    const now = startDate ? new Date(startDate) : new Date();
-    const nextDay = endDate ? new Date(endDate) : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    if (!order && orderCode) {
+      order = await RentalOrder.findOne({ orderCode });
+    }
 
-    const parsedItems = parseOrderItems(items) || [
-      {
-        productId: new mongoose.Types.ObjectId(),
-        productName: `ÄÆ¡n hÃ ng ${type === "THRIFT" ? "Thrift" : "ThuÃª"} (${code})`,
-        quantity: 1,
-        pricePerDay: payAmount,
-        depositAmount: 0,
-        imageUrl: "",
-      },
-    ];
-
-    const calcRentalFee = rentalFee !== undefined ? Number(rentalFee) : payAmount;
-    const calcDepositAmount = depositAmount !== undefined ? Number(depositAmount) : 0;
-    const calcShippingFee = shippingFee !== undefined ? Number(shippingFee) : 0;
-    const finalTotal = payAmount || (calcRentalFee + calcDepositAmount + calcShippingFee);
-
-    const shipAddr = shippingAddress || {};
-    const effectiveAddress = {
-      recipientName: (shipAddr.recipientName || user.fullName || "KhÃ¡ch hÃ ng").trim(),
-      recipientPhone: (shipAddr.recipientPhone || user.phoneNumber || "0988776655").trim(),
-      province: (shipAddr.province || user.address?.province || "Há»“ ChÃ­ Minh").trim(),
-      district: (shipAddr.district || user.address?.district || "Quáº­n 1").trim(),
-      ward: (shipAddr.ward || user.address?.ward || "Báº¿n NghÃ©").trim(),
-      detail: (shipAddr.detail || user.address?.detail || "Äá»‹a chá»‰ máº·c Ä‘á»‹nh").trim(),
+    const parseOrderItems = (rawItems) => {
+      if (Array.isArray(rawItems) && rawItems.length > 0) {
+        return rawItems.map((it) => {
+          let pId = it.productId || it.id;
+          if (!pId || !mongoose.Types.ObjectId.isValid(pId)) {
+            pId = new mongoose.Types.ObjectId();
+          }
+          return {
+            productId: pId,
+            productName: it.productName || it.title || `Sản phẩm (${code})`,
+            quantity: Math.max(1, Number(it.quantity || it.qty || 1)),
+            pricePerDay: Number(it.pricePerDay || it.dailyPrice || it.price || 0),
+            depositAmount: Number(it.depositAmount || it.deposit || 0),
+            imageUrl: it.imageUrl || it.image || "",
+          };
+        });
+      }
+      return null;
     };
 
-    order = await RentalOrder.create({
-      orderCode: code,
-      renterId: user._id,
-      shopOwnerId: shopOwner._id,
-      items: parsedItems,
-      startDate: now,
-      endDate: nextDay,
-      rentalFee: calcRentalFee,
-      depositAmount: calcDepositAmount,
-      shippingFee: calcShippingFee,
-      totalAmount: finalTotal,
-      shippingAddress: effectiveAddress,
-      status: "WAITING_PAYMENT",
-      paymentStatus: "PENDING",
-    });
+    if (order) {
+      if (order.renterId.toString() !== user._id.toString()) {
+        throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
+      }
+      const parsed = parseOrderItems(items);
+      if (parsed && (order.items.length === 0 || order.items[0]?.productName?.includes("Đơn hàng"))) {
+        order.items = parsed;
+        if (shippingAddress) {
+          order.shippingAddress = {
+            recipientName: (shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "Khách hàng").trim(),
+            recipientPhone: (shippingAddress.recipientPhone || order.shippingAddress?.recipientPhone || user.phoneNumber || "0988776655").trim(),
+            province: (shippingAddress.province || order.shippingAddress?.province || "Hồ Chí Minh").trim(),
+            district: (shippingAddress.district || order.shippingAddress?.district || "Quận 1").trim(),
+            ward: (shippingAddress.ward || order.shippingAddress?.ward || "Bến Nghé").trim(),
+            detail: (shippingAddress.detail || order.shippingAddress?.detail || "Địa chỉ mặc định").trim(),
+          };
+        }
+        await order.save();
+      }
+      payAmount = order.totalAmount;
+      code = order.orderCode;
+      targetOrderId = order._id;
+    } else {
+      payAmount = payAmount || 1500000;
+
+      let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
+      if (!shopOwner) {
+        shopOwner = await User.create({
+          email: `shop_${Date.now()}@reuse.vn`,
+          passwordHash: "dummyPasswordHash123",
+          fullName: "ReUse Official Shop",
+          phoneNumber: "0901234567",
+          role: "SHOP_OWNER",
+        });
+      }
+
+      const now = startDate ? new Date(startDate) : new Date();
+      const nextDay = endDate ? new Date(endDate) : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+      const parsedItems = parseOrderItems(items) || [
+        {
+          productId: new mongoose.Types.ObjectId(),
+          productName: `Đơn hàng Thuê (${code})`,
+          quantity: 1,
+          pricePerDay: payAmount,
+          depositAmount: 0,
+          imageUrl: "",
+        },
+      ];
+
+      const calcRentalFee = rentalFee !== undefined ? Number(rentalFee) : payAmount;
+      const calcDepositAmount = depositAmount !== undefined ? Number(depositAmount) : 0;
+      const calcShippingFee = shippingFee !== undefined ? Number(shippingFee) : 0;
+      const finalTotal = payAmount || (calcRentalFee + calcDepositAmount + calcShippingFee);
+
+      const shipAddr = shippingAddress || {};
+      const effectiveAddress = {
+        recipientName: (shipAddr.recipientName || user.fullName || "Khách hàng").trim(),
+        recipientPhone: (shipAddr.recipientPhone || user.phoneNumber || "0988776655").trim(),
+        province: (shipAddr.province || user.address?.province || "Hồ Chí Minh").trim(),
+        district: (shipAddr.district || user.address?.district || "Quận 1").trim(),
+        ward: (shipAddr.ward || user.address?.ward || "Bến Nghé").trim(),
+        detail: (shipAddr.detail || user.address?.detail || "Địa chỉ mặc định").trim(),
+      };
+
+      order = await RentalOrder.create({
+        orderCode: code,
+        renterId: user._id,
+        shopOwnerId: shopOwner._id,
+        startDate: now,
+        endDate: nextDay,
+        rentalDays: Math.max(1, Math.ceil((nextDay.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))),
+        items: parsedItems,
+        rentalFee: calcRentalFee,
+        depositAmount: calcDepositAmount,
+        shippingFee: calcShippingFee,
+        totalAmount: finalTotal,
+        shippingAddress: effectiveAddress,
+        status: RENTAL_ORDER_STATUS.WAITING_PAYMENT,
+        paymentStatus: "PENDING",
+      });
+
+      targetOrderId = order._id;
+    }
   }
 
-  // 4. Sinh mÃ£ giao dá»‹ch duy nháº¥t cho phiÃªn thanh toÃ¡n
+  // 4. Sinh mã giao dịch duy nhất cho phiên thanh toán
   const txnRef = `${code}_${Date.now()}`;
   const description = `Thanh toan don ${type.toLowerCase()} ${code}`;
 
-  // 5. LÆ°u payment record tráº¡ng thÃ¡i PENDING
+  // 5. Lưu payment record trạng thái PENDING
   await Payment.create({
-    orderId: order._id,
-    orderType: type,
+    orderId: targetOrderId,
+    orderType: isThrift ? "THRIFT" : "RENT",
     userId: user._id,
     amount: payAmount,
     status: "PENDING",
@@ -173,7 +208,7 @@ const createVnPayPaymentUrl = async ({
     description,
   });
 
-  // 6. Táº¡o VNPay Payment URL (Sandbox)
+  // 6. Tạo VNPay Payment URL (Sandbox)
   const effectiveReturnUrl = returnUrl || VNPAY_RETURN_URL;
   const paymentUrl = buildVnPayUrl({
     tmnCode: VNPAY_TMN_CODE,
@@ -188,20 +223,20 @@ const createVnPayPaymentUrl = async ({
   });
 
   return {
-    orderId: order._id,
+    orderId: targetOrderId,
     orderCode: code,
     totalAmount: payAmount,
     txnRef,
     vnpUrl: paymentUrl,
     paymentUrl,
+    type: isThrift ? "THRIFT" : "RENT",
   };
 };
 
 /**
- * [BE-S3-05] Xá»­ lÃ½ Webhook IPN tá»« VNPay (Server-to-Server)
+ * [BE-S3-05] Xử lý Webhook IPN từ VNPay (Server-to-Server)
  */
 const processVnPayIpn = async (queryParams = {}) => {
-  // 1. AC: XÃ¡c minh chá»¯ kÃ½ VNPay (checksum SHA512)
   const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
   if (!isValidSignature) {
     return { RspCode: "97", Message: "Invalid Checksum" };
@@ -212,15 +247,103 @@ const processVnPayIpn = async (queryParams = {}) => {
   const responseCode = queryParams.vnp_ResponseCode;
   const transactionStatus = queryParams.vnp_TransactionStatus;
 
-  // 2. TÃ¬m payment record theo txnRef
   let payment = await Payment.findOne({ txnRef });
+  const isThrift = payment?.orderType === "THRIFT" || txnRef?.includes("TRF");
 
-  // 3. TÃ¬m RentalOrder
+  if (isThrift) {
+    let thriftOrder = null;
+    if (payment) {
+      thriftOrder = await ThriftOrder.findById(payment.orderId);
+    }
+    if (!thriftOrder) {
+      const orderCode = txnRef?.split("_")[0];
+      if (orderCode) {
+        thriftOrder = await ThriftOrder.findOne({
+          $or: [{ orderCode }, { orderCode: `#${orderCode}` }],
+        });
+      }
+    }
+
+    if (!thriftOrder) {
+      return { RspCode: "01", Message: "Thrift Order not found" };
+    }
+
+    if (Math.round(thriftOrder.totalAmount) !== Math.round(vnpAmount)) {
+      return { RspCode: "04", Message: "Invalid amount" };
+    }
+
+    if (thriftOrder.status === "PAID" || thriftOrder.paymentStatus === "PAID") {
+      return { RspCode: "02", Message: "Order already confirmed" };
+    }
+
+    const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
+
+    if (isSuccess) {
+      thriftOrder.status = "DELIVERED";
+      thriftOrder.paymentStatus = "PAID";
+      thriftOrder.escrowStatus = "HELD_72H";
+      const now = new Date();
+      thriftOrder.timeline = [
+        {
+          status: "PENDING_PAYMENT",
+          title: "Khởi tạo phiên đặt đơn THRIFT",
+          description: "Đơn mua đã được tạo thành công trên hệ thống ReUse Hub.",
+          timestamp: new Date(now.getTime() - 3600000 * 3),
+        },
+        {
+          status: "PAID",
+          title: "Thanh toán Smart Escrow (VNPay Lock)",
+          description: `Đã nhận thanh toán ${thriftOrder.totalAmount.toLocaleString('vi-VN')}₫ từ VNPay. Tiền được ký quỹ bảo chứng Smart Escrow.`,
+          timestamp: new Date(now.getTime() - 3600000 * 2),
+        },
+        {
+          status: "PROCESSING",
+          title: "Atelier Thẩm định & Niêm phong sáp",
+          description: "Kiểm tra phòng Lab Collimator đạt chuẩn 100%. Niêm phong sáp yếm khí hoàn tất (Tự động thông qua cho Test User).",
+          timestamp: new Date(now.getTime() - 3600000 * 1.5),
+        },
+        {
+          status: "SHIPPED",
+          title: "Vận chuyển bọc thép Nanuk 935",
+          description: "Bưu tá chuyên trách Viettel Armored Transit đã bàn giao vali bọc thép an toàn.",
+          timestamp: new Date(now.getTime() - 3600000 * 0.5),
+        },
+        {
+          status: "DELIVERED",
+          title: "Đã giao hàng · Cửa sổ đối kiểm 72H đang mở",
+          description: "Đã giao hàng tận tay an toàn. Quý khách có trọn vẹn 72 giờ đối kiểm độc lập trước khi Smart Escrow giải ngân.",
+          timestamp: now,
+        },
+      ];
+
+      if (payment) {
+        payment.status = "PAID";
+        payment.transactionNo = queryParams.vnp_TransactionNo || "";
+        payment.bankCode = queryParams.vnp_BankCode || "";
+        payment.vnpResponse = queryParams;
+        payment.paidAt = new Date();
+        await payment.save();
+      }
+
+      await thriftOrder.save();
+      return { RspCode: "00", Message: "Confirm Success" };
+    } else {
+      thriftOrder.paymentStatus = "FAILED";
+      if (payment) {
+        payment.status = "FAILED";
+        payment.vnpResponse = queryParams;
+        await payment.save();
+      }
+      await thriftOrder.save();
+      return { RspCode: "00", Message: "Confirm Success" };
+    }
+  }
+
+  // Xử lý đơn RENT
   let order = null;
   if (payment) {
     order = await RentalOrder.findById(payment.orderId);
   } else {
-    // Fallback: tÃ¬m qua orderCode trong txnRef
     const orderCode = txnRef?.split("_")[0];
     if (orderCode) {
       order = await RentalOrder.findOne({ orderCode });
@@ -231,12 +354,10 @@ const processVnPayIpn = async (queryParams = {}) => {
     return { RspCode: "01", Message: "Order not found" };
   }
 
-  // 4. AC: Kiá»ƒm tra sá»‘ tiá»n
   if (Math.round(order.totalAmount) !== Math.round(vnpAmount)) {
     return { RspCode: "04", Message: "Invalid amount" };
   }
 
-  // 5. AC: KhÃ´ng táº¡o duplicate payment record / khÃ´ng xá»­ lÃ½ Ä‘Æ¡n Ä‘Ã£ confirm
   if (
     (payment && payment.status === "PAID") ||
     order.status === RENTAL_ORDER_STATUS.PAID ||
@@ -245,12 +366,13 @@ const processVnPayIpn = async (queryParams = {}) => {
     return { RspCode: "02", Message: "Order already confirmed" };
   }
 
-  // 6. Kiá»ƒm tra mÃ£ pháº£n há»“i giao dá»‹ch
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // AC: Thanh toÃ¡n thÃ nh cÃ´ng -> cáº­p nháº­t RentalOrder thÃ nh PAID
-    order.status = RENTAL_ORDER_STATUS.DELIVERED; if (!order.shippingDetails) { order.shippingDetails = {}; } order.shippingDetails.deliveredAt = new Date(); order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
+    order.status = RENTAL_ORDER_STATUS.DELIVERED;
+    if (!order.shippingDetails) { order.shippingDetails = {}; }
+    order.shippingDetails.deliveredAt = new Date();
+    order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
     order.paymentStatus = "PAID";
 
     if (payment) {
@@ -279,7 +401,6 @@ const processVnPayIpn = async (queryParams = {}) => {
     await order.save();
     return { RspCode: "00", Message: "Confirm Success" };
   } else {
-    // Thanh toÃ¡n tháº¥t báº¡i hoáº·c khÃ¡ch há»§y
     order.paymentStatus = "FAILED";
     if (payment) {
       payment.status = "FAILED";
@@ -287,23 +408,21 @@ const processVnPayIpn = async (queryParams = {}) => {
       await payment.save();
     }
     await order.save();
-
     return { RspCode: "00", Message: "Confirm Success" };
   }
 };
 
 /**
- * [BE-S3-05] Xá»­ lÃ½ Return URL tá»« VNPay (Browser callback sau thanh toÃ¡n)
+ * [BE-S3-05] Xử lý Return URL từ VNPay (Browser callback sau thanh toán)
  */
 const processVnPayReturn = async (queryParams = {}) => {
-  // 1. AC: XÃ¡c minh chá»¯ kÃ½
   const isValidSignature = verifyVnPaySignature(queryParams, VNPAY_HASH_SECRET);
   if (!isValidSignature) {
     return {
       success: false,
       status: "FAILED",
       responseCode: "97",
-      message: "Chá»¯ kÃ½ VNPay khÃ´ng há»£p lá»‡ (Invalid Checksum)",
+      message: "Chữ ký VNPay không hợp lệ (Invalid Checksum)",
     };
   }
 
@@ -313,8 +432,117 @@ const processVnPayReturn = async (queryParams = {}) => {
   const transactionStatus = queryParams.vnp_TransactionStatus;
 
   let payment = await Payment.findOne({ txnRef });
-  let order = null;
+  const isThrift = payment?.orderType === "THRIFT" || txnRef?.includes("TRF");
 
+  if (isThrift) {
+    let thriftOrder = null;
+    if (payment) {
+      thriftOrder = await ThriftOrder.findById(payment.orderId);
+    }
+    if (!thriftOrder) {
+      const orderCode = txnRef?.split("_")[0];
+      if (orderCode) {
+        thriftOrder = await ThriftOrder.findOne({
+          $or: [{ orderCode }, { orderCode: `#${orderCode}` }],
+        });
+      }
+    }
+
+    if (!thriftOrder) {
+      return {
+        success: false,
+        status: "FAILED",
+        responseCode: "01",
+        message: "Không tìm thấy đơn hàng THRIFT",
+      };
+    }
+
+    const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
+
+    if (isSuccess) {
+      if (thriftOrder.status !== "DELIVERED") {
+        thriftOrder.status = "DELIVERED";
+        thriftOrder.paymentStatus = "PAID";
+        thriftOrder.escrowStatus = "HELD_72H";
+        const now = new Date();
+        thriftOrder.timeline = [
+          {
+            status: "PENDING_PAYMENT",
+            title: "Khởi tạo phiên đặt đơn THRIFT",
+            description: "Đơn mua đã được tạo thành công trên hệ thống ReUse Hub.",
+            timestamp: new Date(now.getTime() - 3600000 * 3),
+          },
+          {
+            status: "PAID",
+            title: "Thanh toán Smart Escrow (VNPay Lock)",
+            description: `Đã nhận thanh toán ${thriftOrder.totalAmount.toLocaleString('vi-VN')}₫ từ VNPay. Tiền được ký quỹ bảo chứng Smart Escrow.`,
+            timestamp: new Date(now.getTime() - 3600000 * 2),
+          },
+          {
+            status: "PROCESSING",
+            title: "Atelier Thẩm định & Niêm phong sáp",
+            description: "Kiểm tra phòng Lab Collimator đạt chuẩn 100%. Niêm phong sáp yếm khí hoàn tất (Tự động thông qua cho Test User).",
+            timestamp: new Date(now.getTime() - 3600000 * 1.5),
+          },
+          {
+            status: "SHIPPED",
+            title: "Vận chuyển bọc thép Nanuk 935",
+            description: "Bưu tá chuyên trách Viettel Armored Transit đã bàn giao vali bọc thép an toàn.",
+            timestamp: new Date(now.getTime() - 3600000 * 0.5),
+          },
+          {
+            status: "DELIVERED",
+            title: "Đã giao hàng · Cửa sổ đối kiểm 72H đang mở",
+            description: "Đã giao hàng tận tay an toàn. Quý khách có trọn vẹn 72 giờ đối kiểm độc lập trước khi Smart Escrow giải ngân.",
+            timestamp: now,
+          },
+        ];
+        await thriftOrder.save();
+      }
+
+      if (payment && payment.status !== "PAID") {
+        payment.status = "PAID";
+        payment.transactionNo = queryParams.vnp_TransactionNo || "";
+        payment.bankCode = queryParams.vnp_BankCode || "";
+        payment.vnpResponse = queryParams;
+        payment.paidAt = new Date();
+        await payment.save();
+      }
+
+      return {
+        success: true,
+        orderId: thriftOrder._id,
+        orderCode: thriftOrder.orderCode,
+        totalAmount: thriftOrder.totalAmount,
+        transactionNo: queryParams.vnp_TransactionNo || "",
+        status: "PAID",
+        type: "THRIFT",
+        message: "Thanh toán đơn mua THRIFT thành công qua VNPay",
+      };
+    } else {
+      if (payment && payment.status === "PENDING") {
+        payment.status = "FAILED";
+        payment.vnpResponse = queryParams;
+        await payment.save();
+      }
+      thriftOrder.paymentStatus = "FAILED";
+      await thriftOrder.save();
+
+      return {
+        success: false,
+        orderId: thriftOrder._id,
+        orderCode: thriftOrder.orderCode,
+        totalAmount: thriftOrder.totalAmount,
+        status: "FAILED",
+        responseCode,
+        type: "THRIFT",
+        message: "Thanh toán đơn mua THRIFT không thành công",
+      };
+    }
+  }
+
+  // Đơn RENT
+  let order = null;
   if (payment) {
     order = await RentalOrder.findById(payment.orderId);
   } else {
@@ -329,28 +557,18 @@ const processVnPayReturn = async (queryParams = {}) => {
       success: false,
       status: "FAILED",
       responseCode: "01",
-      message: "KhÃ´ng tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng",
-    };
-  }
-
-  // 2. AC: Kiá»ƒm tra sá»‘ tiá»n
-  if (Math.round(order.totalAmount) !== Math.round(vnpAmount)) {
-    return {
-      success: false,
-      orderId: order._id,
-      orderCode: order.orderCode,
-      status: "FAILED",
-      responseCode: "04",
-      message: "Sá»‘ tiá»n thanh toÃ¡n khÃ´ng khá»›p vá»›i Ä‘Æ¡n hÃ ng",
+      message: "Không tìm thấy đơn hàng",
     };
   }
 
   const isSuccess = responseCode === "00" && (!transactionStatus || transactionStatus === "00");
 
   if (isSuccess) {
-    // Äáº£m báº£o Ä‘Æ¡n Ä‘Æ°á»£c cáº­p nháº­t PAID náº¿u IPN chÆ°a xá»­ lÃ½ ká»‹p
     if (order.status !== RENTAL_ORDER_STATUS.PAID) {
-      order.status = RENTAL_ORDER_STATUS.DELIVERED; if (!order.shippingDetails) { order.shippingDetails = {}; } order.shippingDetails.deliveredAt = new Date(); order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
+      order.status = RENTAL_ORDER_STATUS.DELIVERED;
+      if (!order.shippingDetails) { order.shippingDetails = {}; }
+      order.shippingDetails.deliveredAt = new Date();
+      order.shippingDetails.carrierName = "Nanuk White-Glove (2 chiều)";
       order.paymentStatus = "PAID";
       await order.save();
     }
@@ -371,7 +589,8 @@ const processVnPayReturn = async (queryParams = {}) => {
       totalAmount: order.totalAmount,
       transactionNo: queryParams.vnp_TransactionNo || "",
       status: "PAID",
-      message: "Thanh toÃ¡n thÃ nh cÃ´ng",
+      type: "RENT",
+      message: "Thanh toán thành công",
     };
   } else {
     if (payment && payment.status === "PENDING") {
@@ -389,7 +608,8 @@ const processVnPayReturn = async (queryParams = {}) => {
       totalAmount: order.totalAmount,
       status: "FAILED",
       responseCode,
-      message: "Thanh toÃ¡n khÃ´ng thÃ nh cÃ´ng hoáº·c ngÆ°á»i dÃ¹ng Ä‘Ã£ há»§y giao dá»‹ch",
+      type: "RENT",
+      message: "Thanh toán không thành công hoặc người dùng đã hủy giao dịch",
     };
   }
 };

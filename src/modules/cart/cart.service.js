@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Cart from "./cart.model.js";
 import RentalProduct from "../rent/product/product.model.js";
+import ThriftListing from "../thrift/listing/thriftListing.model.js";
 
 const ITEM_FIELD_BY_TYPE = Object.freeze({
   RENT: "rentItems",
@@ -53,10 +54,15 @@ const assertRentProductAddable = async (productId, quantity) => {
 const getCart = async (userId) => {
   await getOrCreateCart(userId);
 
-  return Cart.findOne({ userId }).populate(
-    "rentItems.productId",
-    "name pricePerDay depositAmount images status totalQuantity ownerId"
-  );
+  return Cart.findOne({ userId })
+    .populate(
+      "rentItems.productId",
+      "name pricePerDay depositAmount images status totalQuantity ownerId location categoryId"
+    )
+    .populate(
+      "thriftItems.productId",
+      "name price images condition status location ownerId categoryId"
+    );
 };
 
 const addItem = async (userId, { type = "RENT", productId, quantity = 1 }) => {

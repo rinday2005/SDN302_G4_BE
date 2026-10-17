@@ -103,6 +103,15 @@ const rentalProductSchema = new mongoose.Schema(
       min: [1, 'totalQuantity phải từ 1 trở lên'], // AC: totalQuantity >= 1
       default: 1,
     },
+    size: {
+      type: String,
+      trim: true,
+      default: 'L',
+    },
+    sizes: {
+      type: [String],
+      default: ['S', 'M', 'L', 'XL'],
+    },
   },
   {
     timestamps: true, // Tự động sinh createdAt, updatedAt

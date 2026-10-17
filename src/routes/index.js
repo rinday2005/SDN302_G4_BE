@@ -1,3 +1,4 @@
+import thriftOrderRoutes from "../modules/thrift/order/thriftOrder.routes.js";
 import { Router } from "express";
 import { successResponse } from "../utils/response.js";
 import authRoutes from "../modules/auth/auth.routes.js";
@@ -22,6 +23,10 @@ import productRoutes from "../modules/rent/product/product.route.js";
 
 import uploadRoutes from "./upload.routes.js";
 import userRoutes from "../modules/user/user.route.js";
+import availabilityRoutes from "../modules/rent/availability/availability.route.js";
+import rentReturnRoutes from "../modules/rent/return/return.route.js";
+import thriftListingRoutes from "../modules/thrift/listing/thriftListing.routes.js";
+import wishlistRoutes from "../modules/wishlist/wishlist.route.js";
 
 const router = Router();
 
@@ -71,6 +76,13 @@ router.use("/api/rent/products", productRoutes);
 router.use("/api/rent/orders", orderRoutes);
 
 // ======================================================
+// THRIFT ORDER
+// ======================================================
+router.use("/api/thrift/orders", thriftOrderRoutes);
+router.use("/api/thrift-orders", thriftOrderRoutes);
+
+
+// ======================================================
 // CART
 // ======================================================
 router.use("/api/cart", cartRoutes);
@@ -93,5 +105,27 @@ router.use("/upload", uploadRoutes);
 // ======================================================
 router.use("/api/users", userRoutes);
 router.use("/users", userRoutes);
+
+
+// ======================================================
+// RENT AVAILABILITY
+// ======================================================
+router.use("/api/rent/availability", availabilityRoutes);
+
+// ======================================================
+// RENT RETURNS
+// ======================================================
+router.use("/api/rent/returns", rentReturnRoutes);
+
+// ======================================================
+// THRIFT LISTINGS (MARKETPLACE)
+// ======================================================
+router.use("/api/thrift/listings", thriftListingRoutes);
+router.use("/api/thrift-listings", thriftListingRoutes);
+
+// ======================================================
+// WISHLIST
+// ======================================================
+router.use("/api/wishlist", wishlistRoutes);
 
 export default router;

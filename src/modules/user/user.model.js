@@ -54,6 +54,23 @@ const userSchema = new mongoose.Schema(
       default: "USER",
     },
 
+    kyc: {
+      citizenId: { type: String, trim: true },
+      fullName: { type: String, trim: true },
+      dob: { type: String, trim: true },
+      idType: { type: String, default: "Căn cước công dân gắn chip (CCCD)" },
+      residentAddress: { type: String, trim: true },
+      cardFrontUrl: { type: String, trim: true },
+      cardBackUrl: { type: String, trim: true },
+      livenessUrl: { type: String, trim: true },
+      kycCode: { type: String, trim: true },
+      tier: { type: String, enum: ["TIER_1", "TIER_2", "TIER_3"], default: "TIER_2" },
+      creditLimit: { type: Number, default: 50000000 },
+      rejectionReason: { type: String, trim: true },
+      submittedAt: { type: Date },
+      verifiedAt: { type: Date },
+    },
+
     kycStatus: {
       type: String,
       enum: ["PENDING", "APPROVED", "REJECTED"],
