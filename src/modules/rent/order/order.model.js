@@ -31,7 +31,7 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
 export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
   WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED"],
-  PAID: ["READY_FOR_HANDOVER", "HANDED_OVER", "CONFIRMED", "PREPARING", "CANCELLED"],
+  PAID: ["READY_FOR_HANDOVER", "HANDED_OVER", "CONFIRMED", "PREPARING", "CANCELLED", "DELIVERED", "RENTING"],
   READY_FOR_HANDOVER: ["HANDED_OVER", "SHIPPING", "CANCELLED"],
   HANDED_OVER: ["SHIPPING", "DELIVERED", "RENTING", "CANCELLED"],
   CONFIRMED: ["PREPARING", "READY_FOR_HANDOVER", "HANDED_OVER", "CANCELLED"],
@@ -39,7 +39,7 @@ export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   SHIPPING: ["DELIVERED", "RENTING"],
   DELIVERED: ["RENTING", "RETURN_REQUESTED", "RETURNING"],
   RENTING: ["RETURN_REQUESTED", "RETURNING", "COMPLETED"],
-  RETURN_REQUESTED: ["RETURNING", "COMPLETED", "CANCELLED"],
+  RETURN_REQUESTED: ["RETURNING", "RETURNED", "COMPLETED", "CANCELLED"],
   RETURNING: ["RETURNED", "COMPLETED"],
   RETURNED: ["COMPLETED"],
   REJECTED: [],
@@ -78,6 +78,11 @@ const rentalOrderItemSchema = new mongoose.Schema(
       required: [true, "depositAmount là bắt buộc"],
       min: [0, "depositAmount phải lớn hơn hoặc bằng 0"],
       default: 0,
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: "",
     },
   },
   { _id: false }
@@ -131,6 +136,27 @@ const shippingDetailsSchema = new mongoose.Schema(
     returnTrackingCode: { type: String, trim: true, default: "" },
     returnShippedAt: { type: Date, default: null },
     returnedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+// Minh chứng bàn giao CLA (Nhật ký mở hộp & đối kiểm 3 góc của khách khi nhận đồ)
+const claProofSchema = new mongoose.Schema(
+  {
+    isSigned: { type: Boolean, default: false },
+    signedAt: { type: Date, default: null },
+    signerName: { type: String, trim: true, default: "" },
+    signerPhone: { type: String, trim: true, default: "" },
+    note: { type: String, trim: true, default: "" },
+    photos: {
+      slot1: { type: String, default: "" }, // Mặt trước & Tổng thể
+      slot2: { type: String, default: "" }, // Góc cạnh & Phụ kiện
+      slot3: { type: String, default: "" }, // Tem niêm phong Nanuk
+    },
+    images: {
+      type: [String],
+      default: [],
+    },
   },
   { _id: false }
 );
@@ -334,6 +360,10 @@ const rentalOrderSchema = new mongoose.Schema(
     shippingDetails: {
       type: shippingDetailsSchema,
       default: () => ({}),
+    },
+    claProof: {
+      type: claProofSchema,
+      default: null,
     },
     returnRequest: {
       type: returnRequestSchema,

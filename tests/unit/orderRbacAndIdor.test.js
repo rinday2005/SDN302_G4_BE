@@ -414,6 +414,45 @@ describe("[TEST-S3-02] Unit Tests: Phân quyền Thao tác Đơn & Chặn IDOR",
       assert.ok(confirmed.receivedAt instanceof Date);
     });
 
+    it("User A ký xác nhận biên bản bàn giao CLA kèm ảnh đối kiểm 3 góc -> Lưu claProof thành công", async () => {
+      const mockOrder = {
+        _id: new mongoose.Types.ObjectId(),
+        renterId: userAId,
+        shopOwnerId: shopOwnerId,
+        status: RENTAL_ORDER_STATUS.DELIVERED,
+        shippingAddress: {
+          recipientName: "Nguyễn Văn A",
+          recipientPhone: "0901234567",
+        },
+        shippingDetails: {},
+        save: async function () {
+          return this;
+        },
+      };
+      RentalOrder.findById = () => Promise.resolve(mockOrder);
+
+      const payload = {
+        photos: {
+          slot1: "https://example.com/photo1.jpg",
+          slot2: "https://example.com/photo2.jpg",
+          slot3: "https://example.com/photo3.jpg",
+        },
+        note: "Hộp còn nguyên niêm phong Nanuk, máy không trầy xước",
+        signerName: "Nguyễn Văn A",
+        signerPhone: "0901234567",
+      };
+
+      const confirmed = await confirmReceivedOrder(mockOrder._id.toString(), mockUserA, payload);
+      assert.strictEqual(confirmed.status, RENTAL_ORDER_STATUS.RENTING);
+      assert.ok(confirmed.claProof);
+      assert.strictEqual(confirmed.claProof.isSigned, true);
+      assert.strictEqual(confirmed.claProof.photos.slot1, "https://example.com/photo1.jpg");
+      assert.strictEqual(confirmed.claProof.photos.slot2, "https://example.com/photo2.jpg");
+      assert.strictEqual(confirmed.claProof.photos.slot3, "https://example.com/photo3.jpg");
+      assert.strictEqual(confirmed.claProof.signerName, "Nguyễn Văn A");
+      assert.strictEqual(confirmed.claProof.note, "Hộp còn nguyên niêm phong Nanuk, máy không trầy xước");
+    });
+
     it("User thường không thể gọi updateOrderStatus -> 403 FORBIDDEN", async () => {
       const mockOrder = {
         _id: new mongoose.Types.ObjectId(),

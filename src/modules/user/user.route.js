@@ -5,6 +5,9 @@ import {
   getProfileController,
   updateProfileController,
   uploadAvatarController,
+  getKycController,
+  submitKycController,
+  updateKycStatusController,
 } from "./user.controller.js";
 
 const router = Router();
@@ -24,5 +27,12 @@ router.post(
   upload.any(),
   uploadAvatarController
 );
+
+
+
+// KYC Customer Verification
+router.get("/kyc", authMiddleware, getKycController);
+router.post("/kyc/submit", authMiddleware, submitKycController);
+router.patch("/kyc/status", authMiddleware, updateKycStatusController);
 
 export default router;

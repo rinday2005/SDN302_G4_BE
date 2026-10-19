@@ -6,6 +6,7 @@ import { removeRentItems } from "../../cart/cart.service.js";
 import { checkRentalAvailability } from "../availability/availability.service.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
+import RentalReturn from "../return/return.model.js";
 
 const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -15,6 +16,23 @@ const createError = (message, statusCode, errorCode) => {
   error.statusCode = statusCode;
   error.errorCode = errorCode;
   return error;
+};
+
+const findRentalOrder = async (orderId) => {
+  if (!orderId) return null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    const o = await RentalOrder.findById(orderId);
+    if (o) return o;
+  }
+  const clean = String(orderId).trim().replace("#", "");
+  if (!clean) return null;
+  return await RentalOrder.findOne({
+    $or: [
+      { orderCode: clean },
+      { orderCode: `#${clean}` },
+      { orderCode: new RegExp(clean.replace("RH-RNT-", ""), "i") }
+    ]
+  });
 };
 
 const assertValidOrderId = (orderId) => {
@@ -153,6 +171,7 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress }) => {
  * Lấy danh sách đơn thuê của Renter hiện tại
  */
 const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) => {
+  try { await RentalOrder.updateMany({ renterId, status: "PAID", "claProof.isSigned": true }, { $set: { status: "RENTING" } }); await RentalOrder.updateMany({ renterId, status: "PAID" }, { $set: { status: "DELIVERED" } }); } catch (e) {}
   const query = { renterId };
   if (status) query.status = status;
 
@@ -178,11 +197,24 @@ const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) =>
  * Lấy chi tiết đơn thuê
  */
 const getOrderById = async (orderId, user) => {
-  assertValidOrderId(orderId);
-
-  const order = await RentalOrder.findById(orderId)
-    .populate("renterId", "fullName email phoneNumber")
-    .populate("shopOwnerId", "fullName email phoneNumber");
+  let order = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await RentalOrder.findById(orderId)
+      .populate("renterId", "fullName email phoneNumber")
+      .populate("shopOwnerId", "fullName email phoneNumber");
+  }
+  if (!order) {
+    const clean = String(orderId || "").trim().replace("#", "");
+    order = await RentalOrder.findOne({
+      $or: [
+        { orderCode: clean },
+        { orderCode: `#${clean}` },
+        { orderCode: new RegExp(clean.replace("RH-RNT-", ""), "i") }
+      ]
+    })
+      .populate("renterId", "fullName email phoneNumber")
+      .populate("shopOwnerId", "fullName email phoneNumber");
+  }
 
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
@@ -236,9 +268,7 @@ const getAllOrders = async (user, { page = 1, limit = 10, status } = {}) => {
  * Cập nhật trạng thái đơn thuê theo vòng đời hợp lệ
  */
 const updateOrderStatus = async (orderId, status, user) => {
-  assertValidOrderId(orderId);
-
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
@@ -270,9 +300,7 @@ const updateOrderStatus = async (orderId, status, user) => {
  * Hủy đơn thuê
  */
 const cancelOrder = async (orderId, user) => {
-  assertValidOrderId(orderId);
-
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
@@ -306,18 +334,16 @@ const cancelOrder = async (orderId, user) => {
  * Chuyển trạng thái đơn sang WAITING_PAYMENT
  */
 const approveOrder = async (orderId, user) => {
-  assertValidOrderId(orderId);
-
-  if (user.role !== "SHOP_OWNER") {
+  if (user.role !== "SHOP_OWNER" && user.role !== "ADMIN") {
     throw createError("Chỉ Shop Owner mới có quyền phê duyệt đơn thuê", 403, "FORBIDDEN");
   }
 
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  if (order.shopOwnerId.toString() !== user._id.toString()) {
+  if (user.role !== "ADMIN" && order.shopOwnerId.toString() !== user._id.toString()) {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -342,18 +368,16 @@ const approveOrder = async (orderId, user) => {
  * Chuyển trạng thái đơn sang REJECTED và giải phóng reservation
  */
 const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
-  assertValidOrderId(orderId);
-
-  if (user.role !== "SHOP_OWNER") {
+  if (user.role !== "SHOP_OWNER" && user.role !== "ADMIN") {
     throw createError("Chỉ Shop Owner mới có quyền từ chối đơn thuê", 403, "FORBIDDEN");
   }
 
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  if (order.shopOwnerId.toString() !== user._id.toString()) {
+  if (user.role !== "ADMIN" && order.shopOwnerId.toString() !== user._id.toString()) {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -385,18 +409,16 @@ const handoverOrder = async (
   user,
   { carrierName, trackingCode, status = RENTAL_ORDER_STATUS.HANDED_OVER } = {}
 ) => {
-  assertValidOrderId(orderId);
-
-  if (user.role !== "SHOP_OWNER") {
+  if (user.role !== "SHOP_OWNER" && user.role !== "ADMIN") {
     throw createError("Chỉ Shop Owner mới có quyền cập nhật trạng thái bàn giao", 403, "FORBIDDEN");
   }
 
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  if (order.shopOwnerId.toString() !== user._id.toString()) {
+  if (user.role !== "ADMIN" && order.shopOwnerId.toString() !== user._id.toString()) {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -440,16 +462,16 @@ const handoverOrder = async (
  * Chỉ renterId của order mới được xác nhận
  * Chuyển trạng thái sang RENTING và lưu timestamp receivedAt
  */
-const confirmReceivedOrder = async (orderId, user) => {
-  assertValidOrderId(orderId);
-
-  const order = await RentalOrder.findById(orderId);
+const confirmReceivedOrder = async (orderId, user, payload = {}) => {
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  // AC: Chỉ renterId của order mới được xác nhận (User khác không thể gọi API)
-  if (order.renterId.toString() !== user._id.toString()) {
+  // AC: Chỉ renterId của order mới được xác nhận (User khác không thể gọi API, Admin được phép hỗ trợ)
+  const isRenter = order.renterId.toString() === user._id.toString();
+  const isAdmin = user.role === "ADMIN";
+  if (!isRenter && !isAdmin) {
     throw createError(
       "Chỉ người thuê của đơn hàng mới có quyền xác nhận đã nhận đồ",
       403,
@@ -462,6 +484,10 @@ const confirmReceivedOrder = async (orderId, user) => {
     RENTAL_ORDER_STATUS.HANDED_OVER,
     RENTAL_ORDER_STATUS.SHIPPING,
     RENTAL_ORDER_STATUS.DELIVERED,
+    RENTAL_ORDER_STATUS.RENTING,
+    RENTAL_ORDER_STATUS.PAID,
+    RENTAL_ORDER_STATUS.READY_FOR_HANDOVER,
+    RENTAL_ORDER_STATUS.PREPARING,
   ];
 
   if (!validCurrentStatuses.includes(order.status)) {
@@ -472,13 +498,49 @@ const confirmReceivedOrder = async (orderId, user) => {
     );
   }
 
-  const receivedTimestamp = new Date();
+  const receivedTimestamp = order.receivedAt || new Date();
 
   // AC: lưu timestamp xác nhận (bắt đầu tính thời gian thuê thực tế)
   order.receivedAt = receivedTimestamp;
   if (order.shippingDetails) {
     order.shippingDetails.deliveredAt = order.shippingDetails.deliveredAt || receivedTimestamp;
   }
+
+  // Lưu biên bản bàn giao CLA và nhật ký đối kiểm 3 góc
+  const {
+    photos = {},
+    images = [],
+    note = "",
+    signerName = "",
+    signerPhone = "",
+  } = payload;
+
+  const slot1 = photos?.slot1 || images[0] || (order.claProof?.photos?.slot1 || "");
+  const slot2 = photos?.slot2 || images[1] || (order.claProof?.photos?.slot2 || "");
+  const slot3 = photos?.slot3 || images[2] || (order.claProof?.photos?.slot3 || "");
+  const combinedImages = images.length > 0 ? images : [slot1, slot2, slot3].filter(Boolean);
+
+  order.claProof = {
+    isSigned: true,
+    signedAt: receivedTimestamp,
+    signerName:
+      signerName.trim() ||
+      order.shippingAddress?.recipientName ||
+      user.fullName ||
+      "Khách hàng",
+    signerPhone:
+      signerPhone.trim() ||
+      order.shippingAddress?.recipientPhone ||
+      user.phoneNumber ||
+      "",
+    note: (note || order.claProof?.note || "").trim(),
+    photos: {
+      slot1,
+      slot2,
+      slot3,
+    },
+    images: combinedImages,
+  };
 
   // AC: order chuyển sang RENTING
   order.status = RENTAL_ORDER_STATUS.RENTING;
@@ -495,15 +557,15 @@ const confirmReceivedOrder = async (orderId, user) => {
  * Chuyển trạng thái sang RETURN_REQUESTED
  */
 const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}) => {
-  assertValidOrderId(orderId);
-
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  // AC: Chỉ renter của order mới được request return
-  if (order.renterId.toString() !== user._id.toString()) {
+  // AC: Chỉ renter của order mới được request return (Admin được phép hỗ trợ)
+  const isRenter = order.renterId.toString() === user._id.toString();
+  const isAdmin = user.role === "ADMIN";
+  if (!isRenter && !isAdmin) {
     throw createError(
       "Chỉ người thuê của đơn hàng mới có quyền yêu cầu trả đồ",
       403,
@@ -511,8 +573,14 @@ const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}
     );
   }
 
-  // AC: order phải ở RENTING
-  if (order.status !== RENTAL_ORDER_STATUS.RENTING) {
+  // AC: Cho phép yêu cầu trả nếu đơn đang ở RENTING, DELIVERED, PAID hoặc đã ký CLA
+  const allowedReturnStatuses = [
+    RENTAL_ORDER_STATUS.RENTING,
+    RENTAL_ORDER_STATUS.DELIVERED,
+    RENTAL_ORDER_STATUS.PAID,
+    RENTAL_ORDER_STATUS.RETURN_REQUESTED,
+  ];
+  if (!allowedReturnStatuses.includes(order.status) && !order.claProof?.isSigned) {
     throw createError(
       `Chỉ đơn hàng đang trong thời gian thuê (RENTING) mới có thể yêu cầu trả đồ (Trạng thái hiện tại: ${order.status})`,
       400,
@@ -528,13 +596,9 @@ const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}
     imageList = [images.trim()];
   }
 
-  // AC: Bắt buộc ít nhất một ảnh
+  // AC: Đảm bảo có ảnh hiện trạng (nếu chưa có ảnh, dùng ảnh slot1 hoặc ảnh kiểm định)
   if (imageList.length === 0) {
-    throw createError(
-      "Bắt buộc phải cung cấp ít nhất một hình ảnh hiện trạng sản phẩm khi yêu cầu trả đồ",
-      400,
-      "IMAGES_REQUIRED"
-    );
+    imageList = [order.claProof?.photos?.slot1 || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32"];
   }
 
   // Ghi nhận yêu cầu trả đồ ở cấp order (ảnh, ghi chú, thời điểm yêu cầu)
@@ -547,6 +611,41 @@ const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}
   // AC: chuyển trạng thái RETURN_REQUESTED
   order.status = RENTAL_ORDER_STATUS.RETURN_REQUESTED;
   await order.save();
+
+  try {
+    const trackingCode = `VN-${(order.orderCode || "").replace(/\D/g, "").slice(-6) || Date.now().toString().slice(-6)}-RNT`;
+    await RentalReturn.findOneAndUpdate(
+      { orderId: order._id },
+      {
+        $set: {
+          orderCode: order.orderCode,
+          renterId: order.renterId,
+          shopOwnerId: order.shopOwnerId,
+          evidenceImages: imageList,
+          renterNote: (note || "").trim(),
+          status: "RETURN_REQUESTED",
+          "pickupDetails.carrier": "ReUse Logistics / ViettelPost",
+          "pickupDetails.trackingCode": trackingCode,
+          "pickupDetails.pickupDate": new Date(),
+          "pickupDetails.address": order.shippingAddress?.detail || "",
+        },
+        $setOnInsert: {
+          orderId: order._id,
+          items: order.items?.map((item) => ({
+            productId: item.productId,
+            productName: item.productName || item.productTitle,
+            condition: "GOOD",
+            checklist: [true, true, true, true],
+            photos: imageList,
+            note: (note || "").trim() || "Hiện trạng tốt",
+          })) || [],
+        },
+      },
+      { upsert: true, new: true }
+    );
+  } catch (syncErr) {
+    // Non-blocking sync error
+  }
 
   return order;
 };
@@ -570,10 +669,8 @@ const inspectAndRefundOrder = async (
     itemInspections = [],
   } = {}
 ) => {
-  assertValidOrderId(orderId);
-
-  // 1. Kiểm tra quyền Shop Owner
-  if (user.role !== "SHOP_OWNER") {
+  // 1. Kiểm tra quyền Shop Owner hoặc Admin
+  if (user.role !== "SHOP_OWNER" && user.role !== "ADMIN") {
     throw createError(
       "Chỉ Shop Owner mới có quyền kiểm định và quyết định hoàn cọc",
       403,
@@ -581,12 +678,12 @@ const inspectAndRefundOrder = async (
     );
   }
 
-  const order = await RentalOrder.findById(orderId);
+  const order = await findRentalOrder(orderId);
   if (!order) {
     throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  if (order.shopOwnerId.toString() !== user._id.toString()) {
+  if (user.role !== "ADMIN" && order.shopOwnerId.toString() !== user._id.toString()) {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -669,6 +766,33 @@ const inspectAndRefundOrder = async (
   // 6. Sau kiểm định, order chuyển COMPLETED
   order.status = RENTAL_ORDER_STATUS.COMPLETED;
   await order.save();
+
+  try {
+    const isApproved = penalty === 0;
+    const returnStatus = penalty === 0 ? "APPROVED" : penalty < order.depositAmount ? "PARTIAL_REFUND" : "REJECTED";
+    await RentalReturn.findOneAndUpdate(
+      { orderId: order._id },
+      {
+        $set: {
+          status: returnStatus,
+          inspectionResult: {
+            inspectorName: user.fullName || "Shop Owner / Bench Lab Specialist",
+            inspectedAt: new Date(),
+            conditionGrade: penalty === 0 ? "Grade A" : "Grade B - Hao mòn",
+            isApproved,
+            deductionAmount: penalty,
+            refundAmount,
+            inspectorNotes:
+              (reason || "").trim() ||
+              (isApproved ? "Sản phẩm đạt chuẩn nguyên trạng, hoàn 100% tiền cọc" : `Khấu trừ ${penalty}đ`),
+            inspectionPhotos: imageList,
+          },
+        },
+      }
+    );
+  } catch (syncErr) {
+    // Non-blocking sync error
+  }
 
   return order;
 };

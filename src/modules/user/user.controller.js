@@ -3,6 +3,9 @@ import {
   getProfile,
   updateProfile,
   updateAvatar,
+  getKycStatus,
+  submitKyc,
+  updateKycStatus,
 } from "./user.service.js";
 import { uploadImageToCloudinary } from "../../utils/cloudinaryUpload.js";
 
@@ -88,6 +91,45 @@ export const uploadAvatarController = async (req, res, next) => {
         user: updatedUser,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/kyc
+ */
+export const getKycController = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const kyc = await getKycStatus(userId);
+    return successResponse(res, "Lấy thông tin KYC thành công", kyc);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/users/kyc/submit
+ */
+export const submitKycController = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const result = await submitKyc(userId, req.body);
+    return successResponse(res, "Gửi hồ sơ KYC thành công. Hệ thống đang tiến hành thẩm định.", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/users/kyc/status
+ */
+export const updateKycStatusController = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const result = await updateKycStatus(userId, req.body);
+    return successResponse(res, "Cập nhật trạng thái KYC thành công", result);
   } catch (error) {
     next(error);
   }
