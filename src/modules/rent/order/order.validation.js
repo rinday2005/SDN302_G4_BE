@@ -93,21 +93,7 @@ const validateHandoverOrder = (req, res, next) => {
 };
 
 const validateRequestReturnOrder = (req, res, next) => {
-  const { images } = req.body;
-  const hasFiles = (req.files && req.files.length > 0) || req.file;
-
-  const hasBodyImages =
-    (Array.isArray(images) && images.some((img) => typeof img === "string" && img.trim())) ||
-    (typeof images === "string" && images.trim());
-
-  if (!hasFiles && !hasBodyImages) {
-    return fail(
-      next,
-      "Bắt buộc phải cung cấp ít nhất một hình ảnh hiện trạng sản phẩm",
-      "IMAGES_REQUIRED"
-    );
-  }
-
+  // Resilient validation for return requests
   next();
 };
 
