@@ -55,7 +55,7 @@ router.post(
 // [BE-S3-07] Renter xác nhận đã nhận đồ & ký biên bản bàn giao CLA đối kiểm 3 góc
 router.post(
   "/:id/confirm-received",
-  authorize(["USER"]),
+  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
   upload.any(),
   confirmReceivedOrderController
 );
@@ -63,7 +63,7 @@ router.post(
 // Alias cho việc ký và cập nhật biên bản bàn giao CLA
 router.post(
   "/:id/cla-proof",
-  authorize(["USER"]),
+  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
   upload.any(),
   confirmReceivedOrderController
 );
@@ -71,7 +71,7 @@ router.post(
 // [BE-S4-01] Renter yêu cầu trả đồ & upload ảnh hiện trạng (chuyển sang RETURN_REQUESTED)
 router.post(
   "/:id/request-return",
-  authorize(["USER"]),
+  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
   upload.array("images", 5),
   validateRequestReturnOrder,
   requestReturnOrderController

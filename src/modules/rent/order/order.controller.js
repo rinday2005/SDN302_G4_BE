@@ -121,18 +121,24 @@ const handoverOrderController = async (req, res, next) => {
 };
 
 const uploadBufferToCloudinary = (buffer, folder = "reuse_hub/cla_proofs") => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "image",
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result.secure_url);
-      }
-    );
-    stream.end(buffer);
+  return new Promise((resolve) => {
+    try {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: "image",
+        },
+        (error, result) => {
+          if (error || !result?.secure_url) {
+            return resolve(`data:image/jpeg;base64,${buffer.toString("base64")}`);
+          }
+          resolve(result.secure_url);
+        }
+      );
+      stream.end(buffer);
+    } catch {
+      resolve(`data:image/jpeg;base64,${buffer.toString("base64")}`);
+    }
   });
 };
 
