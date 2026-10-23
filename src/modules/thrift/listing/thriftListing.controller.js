@@ -53,3 +53,17 @@ export const getThriftListingById = async (req, res, next) => {
     next(error);
   }
 };
+
+export const convertFromRental = async (req, res, next) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const result = await thriftService.convertFromRental(userId, req.body);
+    return res.status(201).json({
+      success: true,
+      message: "Chuyển đổi sản phẩm sang thanh lý thành công",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -12,6 +12,13 @@ router.get("/:id", thriftController.getThriftListingById);
 // Private: Chỉ Shop Owner mới có quyền tạo và sửa
 // AC: User gọi API này trả 403
 router.post(
+  "/convert-from-rental",
+  authMiddleware,
+  authorize(["SHOP_OWNER"]),
+  thriftController.convertFromRental
+);
+
+router.post(
   "/",
   authMiddleware,
   authorize(["SHOP_OWNER"]),

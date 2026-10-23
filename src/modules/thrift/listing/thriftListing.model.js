@@ -49,7 +49,7 @@ const thriftListingSchema = new mongoose.Schema(
     },
     sourceType: {
       type: String,
-      enum: ["MANUAL", "FROM_RENTAL"],
+      enum: ["MANUAL", "FROM_RENTAL", "RENTAL_PRODUCT"],
       default: "MANUAL",
     },
     sourceRentalProductId: {
