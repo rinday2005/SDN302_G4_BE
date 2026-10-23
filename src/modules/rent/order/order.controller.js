@@ -297,6 +297,48 @@ const inspectAndRefundOrderController = async (req, res, next) => {
   }
 };
 
+const createDisputeOrderController = async (req, res, next) => {
+  try {
+    let damageImages = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        if (file.path && file.path.startsWith("http")) {
+          damageImages.push(file.path);
+        } else if (file.buffer) {
+          const uploadPromise = new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              { folder: "reuse_hub/disputes" },
+              (err, result) => {
+                if (err) return reject(err);
+                resolve(result.secure_url);
+              }
+            );
+            stream.end(file.buffer);
+          });
+          const url = await uploadPromise;
+          damageImages.push(url);
+        }
+      }
+    }
+    if (req.body.damageImages) {
+      const extraImages = Array.isArray(req.body.damageImages)
+        ? req.body.damageImages
+        : [req.body.damageImages];
+      damageImages = [...damageImages, ...extraImages];
+    }
+
+    const { createRentalOrderDisputeService } = await import("../../admin/admin.service.js");
+    const order = await createRentalOrderDisputeService(req.params.id, req.user, {
+      reason: req.body.reason || req.body.disputeReason,
+      damageImages,
+    });
+
+    return successResponse(res, "Dispute raised successfully. Waiting for admin review.", order);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
@@ -310,4 +352,5 @@ export {
   confirmReceivedOrderController,
   requestReturnOrderController,
   inspectAndRefundOrderController,
+  createDisputeOrderController,
 };

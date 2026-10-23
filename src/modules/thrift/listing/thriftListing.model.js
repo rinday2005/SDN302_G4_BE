@@ -87,7 +87,7 @@ const thriftListingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: {
-        values: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'SOLD', 'HIDDEN'],
+        values: ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'SOLD', 'HIDDEN'],
         message: 'status không hợp lệ',
       },
       default: 'APPROVED',
@@ -101,6 +101,11 @@ const thriftListingSchema = new mongoose.Schema(
     approvedAt: {
       type: Date,
       default: null,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   {
