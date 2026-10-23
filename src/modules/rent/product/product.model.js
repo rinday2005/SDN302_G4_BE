@@ -81,7 +81,7 @@ const rentalProductSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: {
-        values: ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'HIDDEN'],
+        values: ['PENDING', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'HIDDEN'],
         message: 'status không hợp lệ',
       },
       default: 'PENDING_APPROVAL',

@@ -15,6 +15,7 @@ import {
   confirmReceivedOrderController,
   requestReturnOrderController,
   inspectAndRefundOrderController,
+  createDisputeOrderController,
 } from "./order.controller.js";
 import {
   validateCreateOrder,
@@ -84,6 +85,14 @@ router.post(
   upload.any(),
   validateInspectAndRefundOrder,
   inspectAndRefundOrderController
+);
+
+// [BE-DISPUTE] Renter / Shop Owner / Admin mở khiếu nại tranh chấp đơn thuê
+router.post(
+  "/:id/dispute",
+  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
+  upload.any(),
+  createDisputeOrderController
 );
 
 // Xem chi tiết đơn thuê (Renter / Shop Owner của đơn / Admin)

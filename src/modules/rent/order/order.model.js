@@ -23,6 +23,7 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   RETURN_REQUESTED: "RETURN_REQUESTED", // Renter gửi yêu cầu trả đồ kèm ảnh hiện trạng
   RETURNING: "RETURNING", // Renter đang gửi trả hàng
   RETURNED: "RETURNED", // Shop đã nhận lại hàng, chờ kiểm tra / hoàn cọc
+  DISPUTED: "DISPUTED", // Đơn có tranh chấp giữa Renter và Shop Owner
   COMPLETED: "COMPLETED", // Hoàn tất đơn thuê
   CANCELLED: "CANCELLED", // Đơn bị hủy
 });
@@ -38,10 +39,11 @@ export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
   PREPARING: ["READY_FOR_HANDOVER", "HANDED_OVER", "SHIPPING", "CANCELLED"],
   SHIPPING: ["DELIVERED", "RENTING"],
   DELIVERED: ["RENTING", "RETURN_REQUESTED", "RETURNING"],
-  RENTING: ["RETURN_REQUESTED", "RETURNING", "COMPLETED"],
-  RETURN_REQUESTED: ["RETURNING", "RETURNED", "COMPLETED", "CANCELLED"],
-  RETURNING: ["RETURNED", "COMPLETED"],
-  RETURNED: ["COMPLETED"],
+  RENTING: ["RETURN_REQUESTED", "RETURNING", "COMPLETED", "DISPUTED"],
+  RETURN_REQUESTED: ["RETURNING", "RETURNED", "COMPLETED", "CANCELLED", "DISPUTED"],
+  RETURNING: ["RETURNED", "COMPLETED", "DISPUTED"],
+  RETURNED: ["COMPLETED", "DISPUTED"],
+  DISPUTED: ["COMPLETED", "CANCELLED"],
   REJECTED: [],
   COMPLETED: [],
   CANCELLED: [],
@@ -252,6 +254,65 @@ const inspectionResultSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Tranh chấp giữa Renter và Shop Owner
+const disputeSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["NONE", "OPEN", "RESOLVED"],
+      default: "NONE",
+    },
+    reason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    damageImages: {
+      type: [String],
+      default: [],
+    },
+    reportedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    reportedAt: {
+      type: Date,
+      default: null,
+    },
+    resolution: {
+      type: String,
+      enum: ["REFUND_RENTER", "PAY_SHOP_OWNER", "SPLIT", "DISMISSED"],
+      default: null,
+    },
+    refundToRenter: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    payoutToShop: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    adminNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    resolvedAt: {
+      type: Date,
+      default: null,
+    },
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const rentalOrderSchema = new mongoose.Schema(
   {
     orderCode: {
@@ -372,6 +433,10 @@ const rentalOrderSchema = new mongoose.Schema(
     inspectionResult: {
       type: inspectionResultSchema,
       default: null,
+    },
+    dispute: {
+      type: disputeSchema,
+      default: () => ({ status: "NONE" }),
     },
   },
   {
