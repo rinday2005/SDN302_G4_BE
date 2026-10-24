@@ -43,8 +43,11 @@ const thriftListingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["PENDING_APPROVAL", "APPROVED", "REJECTED", "SOLD", "HIDDEN"],
-      default: "PENDING_APPROVAL",
+      enum: {
+        values: ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'SOLD', 'HIDDEN'],
+        message: 'status không hợp lệ',
+      },
+      default: 'APPROVED',
       index: true,
     },
     sourceType: {
@@ -56,6 +59,11 @@ const thriftListingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "RentalProduct",
       default: null,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   {

@@ -27,6 +27,8 @@ import availabilityRoutes from "../modules/rent/availability/availability.route.
 import rentReturnRoutes from "../modules/rent/return/return.route.js";
 import thriftListingRoutes from "../modules/thrift/listing/thriftListing.routes.js";
 import wishlistRoutes from "../modules/wishlist/wishlist.route.js";
+import { kycRouter, adminKycRouter } from "../modules/kyc/kyc.route.js";
+import adminRouter from "../modules/admin/admin.route.js";
 
 const router = Router();
 
@@ -127,5 +129,16 @@ router.use("/api/thrift-listings", thriftListingRoutes);
 // WISHLIST
 // ======================================================
 router.use("/api/wishlist", wishlistRoutes);
+
+// ======================================================
+// IDENTITY VERIFICATION (KYC)
+// ======================================================
+router.use("/api/kyc", kycRouter);
+router.use("/api/admin/kyc", adminKycRouter);
+
+// ======================================================
+// ADMIN: LISTING MODERATION, DISPUTES, FINANCE REPORTING
+// ======================================================
+router.use("/api/admin", adminRouter);
 
 export default router;

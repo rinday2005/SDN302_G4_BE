@@ -1,4 +1,5 @@
 import User from "./user.model.js";
+import KycRecord from "../kyc/kyc.model.js";
 
 /**
  * Format user data returned to client
@@ -192,6 +193,16 @@ export const submitKyc = async (userId, data) => {
   user.kyc = { ...user.kyc, ...kycData };
   user.kycStatus = "PENDING";
   await user.save();
+
+  // Keep KycRecord collection synchronized
+  await KycRecord.create({
+    userId: user._id,
+    idCardNumber: data.idCardNumber || data.citizenId || user.kyc?.citizenId || "04809400••••",
+    frontImageUrl: data.frontImageUrl || data.cardFrontUrl || user.kyc?.cardFrontUrl || "https://example.com/front.jpg",
+    backImageUrl: data.backImageUrl || data.cardBackUrl || user.kyc?.cardBackUrl || "https://example.com/back.jpg",
+    status: "PENDING",
+    rejectionReason: null,
+  });
 
   return getKycStatus(userId);
 };
