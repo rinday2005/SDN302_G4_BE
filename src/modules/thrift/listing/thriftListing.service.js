@@ -49,6 +49,11 @@ export const getPublicListings = async (query = {}) => {
   return await ThriftListing.find(filter).populate("categoryId", "name").lean();
 };
 
+// 3.1 Lấy danh sách listing của Shop Owner (gồm mọi trạng thái)
+export const getShopListings = async (filter = {}) => {
+  return await ThriftListing.find(filter).populate("categoryId", "name").sort({ createdAt: -1 }).lean();
+};
+
 // 4. Lấy chi tiết listing theo ID
 export const getListingById = async (listingId) => {
   const listing = await ThriftListing.findById(listingId)

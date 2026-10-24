@@ -156,10 +156,13 @@ export const checkoutThriftOrder = async ({
   const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
   const orderCode = `TO-${Date.now()}-${randomSuffix}`;
 
+  const shopOwnerId = listings[0]?.ownerId || null;
+
   const order = await ThriftOrder.create({
     orderCode,
     buyerId: user._id,
     userId: user._id,
+    shopOwnerId,
     items: orderItems,
     itemsTotal,
     subtotal: itemsTotal,
@@ -298,9 +301,11 @@ export const getThriftOrderById = async (orderId, user) => {
   const buyerIdStr = order.buyerId?._id ? order.buyerId._id.toString() : order.buyerId.toString();
   const isBuyer = buyerIdStr === user._id.toString();
   const isAdmin = user.role === "ADMIN";
-  const isSeller = order.items.some(
-    (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
-  );
+  const isSeller =
+    (order.shopOwnerId && order.shopOwnerId.toString() === user._id.toString()) ||
+    order.items.some(
+      (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
+    );
 
   if (!isBuyer && !isAdmin && !isSeller) {
     throw createError("Bạn không có quyền xem đơn hàng này", 403, "FORBIDDEN");
@@ -346,10 +351,19 @@ export const getMyThriftOrders = async (user, { status, page = 1, limit = 20 } =
  * Lấy danh sách đơn hàng THRIFT dành cho Shop Owner (người bán đồ thanh lý)
  */
 export const getSellerThriftOrders = async (user, { status, page = 1, limit = 20 } = {}) => {
-  const filter = {
-    $or: [{ "items.sellerId": user._id }, { "items.ownerId": user._id }],
-  };
-  if (status) {
+  const filter = {};
+
+  if (user.role === "SHOP_OWNER") {
+    filter.$or = [
+      { shopOwnerId: user._id },
+      { "items.sellerId": user._id },
+      { "items.ownerId": user._id },
+    ];
+  } else if (user.role !== "ADMIN") {
+    throw createError("Chỉ Shop Owner hoặc Admin mới có quyền xem đơn hàng của shop", 403, "FORBIDDEN");
+  }
+
+  if (status && status !== "ALL") {
     filter.status = status;
   }
 
@@ -362,7 +376,7 @@ export const getSellerThriftOrders = async (user, { status, page = 1, limit = 20
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parsedLimit)
-      .populate("buyerId", "fullName email phoneNumber")
+      .populate("buyerId", "fullName email phoneNumber address avatar")
       .populate("items.listingId"),
     ThriftOrder.countDocuments(filter),
   ]);
@@ -429,9 +443,11 @@ export const updateThriftOrderStatus = async (orderId, user, nextStatus) => {
   }
 
   const isAdmin = user.role === "ADMIN";
-  const isSeller = order.items.some(
-    (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
-  );
+  const isSeller =
+    (order.shopOwnerId && order.shopOwnerId.toString() === user._id.toString()) ||
+    order.items.some(
+      (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
+    );
 
   if (!isAdmin && !isSeller) {
     throw createError("Chỉ người bán của đơn hàng hoặc Admin mới có quyền cập nhật trạng thái", 403, "FORBIDDEN");

@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 import RentalOrder, { canTransitionStatus, RENTAL_ORDER_STATUS } from "./order.model.js";
 import RentalProduct from "../product/product.model.js";
 import Cart from "../../cart/cart.model.js";
@@ -200,10 +200,11 @@ const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) =>
 const getOrderById = async (orderId, user) => {
   let order = null;
   if (mongoose.Types.ObjectId.isValid(orderId)) {
-    order = await RentalOrder.findById(orderId)
-      .populate("renterId", "fullName email phoneNumber")
-      .populate("shopOwnerId", "fullName email phoneNumber")
-      .populate("items.productId", "name images pricePerDay depositAmount condition location");
+    let q = RentalOrder.findById(orderId);
+    if (typeof q?.populate === "function") q = q.populate("renterId", "fullName email phoneNumber");
+    if (typeof q?.populate === "function") q = q.populate("shopOwnerId", "fullName email phoneNumber");
+    if (typeof q?.populate === "function") q = q.populate("items.productId", "name images pricePerDay depositAmount condition location");
+    order = await q;
   }
   if (!order) {
     const clean = String(orderId || "").trim().replace("#", "");

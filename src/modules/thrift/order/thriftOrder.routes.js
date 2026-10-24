@@ -27,8 +27,10 @@ router.post("/checkout", validateCheckoutThriftOrder, checkoutThriftOrder);
 // Xem danh sách đơn của người mua
 router.get("/my-orders", getMyThriftOrders);
 
-// Xem danh sách đơn của người bán (Shop Owner)
+// Xem danh sách đơn của người bán (Shop Owner / Admin)
 router.get("/seller-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
+router.get("/shop", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
+router.get("/shop-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
 
 // Xem chi tiết đơn hàng (Chặn IDOR)
 router.get("/:id", getThriftOrderById);

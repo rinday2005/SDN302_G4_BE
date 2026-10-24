@@ -118,6 +118,11 @@ const thriftOrderSchema = new mongoose.Schema(
       required: [true, "buyerId là bắt buộc"],
       index: true,
     },
+    shopOwnerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -5,6 +5,14 @@ import authorize from "../../../middleware/role.middleware.js";
 
 const router = express.Router();
 
+// Private: Chỉ Shop Owner / Admin mới xem tất cả listing của mình
+router.get(
+  "/shop/mine",
+  authMiddleware,
+  authorize(["SHOP_OWNER", "ADMIN"]),
+  thriftController.getShopThriftListings
+);
+
 // Public: Xem danh sách bài đăng (chỉ lấy status APPROVED)
 router.get("/", thriftController.getPublicThriftListings);
 router.get("/:id", thriftController.getThriftListingById);

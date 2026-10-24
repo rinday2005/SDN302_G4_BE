@@ -41,6 +41,20 @@ export const getPublicThriftListings = async (req, res, next) => {
   }
 };
 
+export const getShopThriftListings = async (req, res, next) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const filter = req.user.role === "ADMIN" ? {} : { ownerId: userId };
+    const listings = await thriftService.getShopListings(filter);
+    return res.status(200).json({
+      success: true,
+      data: listings,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getThriftListingById = async (req, res, next) => {
   try {
     const { id } = req.params;
