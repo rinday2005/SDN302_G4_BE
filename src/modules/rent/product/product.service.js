@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+﻿import mongoose from "mongoose";
 import RentalProduct from "./product.model.js";
 import RentalOrder from "../order/order.model.js";
 
@@ -235,7 +235,7 @@ const getPublicProducts = async (query = {}) => {
   const parsedPage = Math.max(1, Number(page) || 1);
 
   const parsedLimit = Math.min(
-    100,
+    500,
     Math.max(1, Number(limit) || 12)
   );
 
