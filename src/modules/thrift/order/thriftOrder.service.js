@@ -1,8 +1,12 @@
 import mongoose from "mongoose";
-import ThriftOrder from "./thriftOrder.model.js";
+import ThriftOrder, { THRIFT_ORDER_STATUS } from "./thriftOrder.model.js";
 import ThriftListing from "../listing/thriftListing.model.js";
 import Cart from "../../cart/cart.model.js";
+import { removeThriftItems } from "../../cart/cart.service.js";
 import User from "../../user/user.model.js";
+import { calculateShippingFee } from "../../../utils/shipping.js";
+
+const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
 
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
@@ -11,561 +15,435 @@ const createError = (message, statusCode, errorCode) => {
   return error;
 };
 
-const assertValidOrderId = (orderId) => {
-  if (!orderId) {
-    throw createError("Mã đơn hàng không hợp lệ", 400, "INVALID_ORDER_ID");
-  }
-};
-
 /**
- * Tạo đơn mua THRIFT
+ * Checkout THRIFT: Tạo một ThriftOrder gồm nhiều listings
+ * AC:
+ * - Một ThriftOrder có thể chứa nhiều THRIFT listings
+ * - Không thể mua listing đã SOLD
+ * - Shipping chỉ tính một lần/order
+ * - Mỗi listing thường có quantity = 1 vì đây là sản phẩm thanh lý độc bản
  */
-export const createThriftOrderService = async ({
+export const checkoutThriftOrder = async ({
   user,
-  items: directItems,
+  listingIds,
   shippingAddress,
-  note = "",
+  shippingFee: customShippingFee,
   paymentMethod = "VNPAY",
+  note = "",
 }) => {
-  if (!user) {
-    throw createError("Vui lòng đăng nhập để thực hiện mua hàng", 401, "UNAUTHORIZED");
+  if (!user || !user._id) {
+    throw createError("User authentication required", 401, "UNAUTHORIZED");
   }
 
-  const buyerId = user._id;
+  // 1. Xác định danh sách listingIds cần checkout
+  let targetListingIds = [];
 
-  // 1. Xác định danh sách items mua: từ directItems hoặc từ Cart
-  let candidateItems = [];
-
-  if (Array.isArray(directItems) && directItems.length > 0) {
-    candidateItems = directItems.map((it) => ({
-      listingId: it.listingId || it.productId || it.id || it._id,
-      quantity: Math.max(1, Number(it.quantity || it.qty || 1)),
-      size: it.size || it.selectedSize || "L",
-      productName: it.productName || it.name || it.title || "Hiện vật độc bản Atelier",
-      price: it.price !== undefined ? Number(it.price) : undefined,
-      imageUrl: it.imageUrl || it.image || "",
-      condition: it.condition || it.grade || "Grade Mint (98%)",
-      vaultOrigin: it.vaultOrigin || "Curated Archive Tokyo",
-      warranty: it.warranty || "Bảo hành cơ học 12 tháng",
-    }));
+  if (Array.isArray(listingIds) && listingIds.length > 0) {
+    targetListingIds = [...new Set(listingIds.map((id) => id.toString()))];
   } else {
-    const cart = await Cart.findOne({ userId: buyerId });
-    if (cart && Array.isArray(cart.thriftItems) && cart.thriftItems.length > 0) {
-      candidateItems = cart.thriftItems.map((it) => ({
-        listingId: it.productId,
-        quantity: it.quantity || 1,
-        size: it.size || "L",
-        productName: it.productName || it.title,
-        price: it.price,
-        imageUrl: it.image || it.imageUrl,
-      }));
+    // Nếu client không truyền listingIds cụ thể, lấy toàn bộ THRIFT items từ Cart của user
+    const cart = await Cart.findOne({ userId: user._id });
+    const thriftItems = cart?.thriftItems || [];
+    if (thriftItems.length === 0) {
+      throw createError("Giỏ hàng thanh lý đang trống", 400, "EMPTY_THRIFT_CART");
+    }
+    targetListingIds = thriftItems.map((item) => item.productId.toString());
+  }
+
+  if (targetListingIds.length === 0) {
+    throw createError("Vui lòng chọn ít nhất một sản phẩm thanh lý để thanh toán", 400, "NO_ITEMS_SELECTED");
+  }
+
+  // 2. Kiểm tra tính hợp lệ của các ObjectIds
+  for (const id of targetListingIds) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw createError(`Mã sản phẩm không hợp lệ: ${id}`, 400, "INVALID_PRODUCT_ID");
     }
   }
 
-  // 2. Tìm kiếm Listings trong DB (chỉ query những ID hợp lệ theo chuẩn ObjectId để tránh CastError)
-  const validListingIds = candidateItems
-    .map((c) => c.listingId)
-    .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
-
-  let listings = [];
-  if (validListingIds.length > 0) {
-    listings = await ThriftListing.find({
-      _id: { $in: validListingIds },
-    });
-  }
-
-  // Nếu không tìm thấy listing khớp theo ID, tìm fallback các sản phẩm APPROVED trong DB
-  if (listings.length === 0) {
-    const defaultListings = await ThriftListing.find({ status: "APPROVED" }).limit(
-      Math.max(1, candidateItems.length || 2)
-    );
-    if (defaultListings.length > 0) {
-      listings = defaultListings;
-    }
-  }
-
-  // 3. Xây dựng orderItems chuẩn xác
-  let itemsSubtotal = 0;
-  let orderItems = [];
-
-  if (listings.length > 0) {
-    orderItems = listings.map((listing) => {
-      const matchCand = candidateItems.find(
-        (c) => String(c.listingId) === String(listing._id)
-      );
-      const qty = matchCand ? matchCand.quantity : 1;
-      const size = matchCand?.size || listing.size || "L";
-      const price = (matchCand && matchCand.price !== undefined) ? matchCand.price : listing.price;
-      const itemTotal = price * qty;
-      itemsSubtotal += itemTotal;
-
-      return {
-        listingId: listing._id,
-        productName: (matchCand && matchCand.productName) ? matchCand.productName : listing.name,
-        price,
-        quantity: qty,
-        size,
-        imageUrl:
-          (matchCand && matchCand.imageUrl) ||
-          (Array.isArray(listing.images) && listing.images.length > 0 ? listing.images[0] : ""),
-        condition:
-          (matchCand && matchCand.condition) || listing.condition || "Grade Mint (98%)",
-        vaultOrigin:
-          (matchCand && matchCand.vaultOrigin) ||
-          (listing.location ? `Curated Archive ${listing.location}` : "Provenance Vault Curated"),
-        warranty: (matchCand && matchCand.warranty) || "Bảo hành cơ học 12 tháng",
-      };
-    });
-  } else if (candidateItems.length > 0) {
-    // Fallback: Nếu không có listing nào trong DB, sử dụng snapshot data từ candidateItems
-    orderItems = candidateItems.map((c) => {
-      const price = c.price !== undefined ? Number(c.price) : 68000000;
-      const qty = c.quantity || 1;
-      itemsSubtotal += price * qty;
-
-      return {
-        listingId: mongoose.Types.ObjectId.isValid(c.listingId)
-          ? c.listingId
-          : new mongoose.Types.ObjectId(),
-        productName: c.productName || "Leica M6 Classic 0.72x Rangefinder Body",
-        price,
-        quantity: qty,
-        size: c.size || "L",
-        imageUrl: c.imageUrl || "",
-        condition: c.condition || "Grade Mint (98%)",
-        vaultOrigin: c.vaultOrigin || "Curated Archive Tokyo",
-        warranty: c.warranty || "Bảo hành cơ học 12 tháng",
-      };
-    });
-  } else {
-    // Fallback mặc định
-    const defaultPrice = 68000000;
-    itemsSubtotal = defaultPrice;
-    orderItems = [
-      {
-        listingId: new mongoose.Types.ObjectId(),
-        productName: "Leica M6 Classic 0.72x Rangefinder Body",
-        price: defaultPrice,
-        quantity: 1,
-        size: "L",
-        imageUrl: "",
-        condition: "Grade Mint (98%)",
-        vaultOrigin: "Curated Archive Tokyo",
-        warranty: "Bảo hành cơ học 12 tháng",
-      },
-    ];
-  }
-
-  // 4. Xác định Shop Owner
-  let shopOwnerId = listings[0]?.ownerId;
-  if (!shopOwnerId || !mongoose.Types.ObjectId.isValid(shopOwnerId)) {
-    const fallbackShop = await User.findOne({ role: "SHOP_OWNER" });
-    shopOwnerId = fallbackShop?._id;
-  }
-  if (!shopOwnerId || !mongoose.Types.ObjectId.isValid(shopOwnerId)) {
-    const adminUser = await User.findOne({ role: "ADMIN" });
-    shopOwnerId = adminUser?._id || buyerId;
-  }
-
-  const shippingFee = 215000; // Phí bưu tá bảo hiểm bọc thép White-Glove
-  const totalAmount = itemsSubtotal + shippingFee;
-
-  // 5. Chuẩn hóa địa chỉ giao nhận
-  const addr = shippingAddress || {};
-  const effectiveAddress = {
-    recipientName: (addr.recipientName || user.fullName || "Khách hàng").trim(),
-    recipientPhone: (addr.recipientPhone || user.phoneNumber || user.phone || "0908421892").trim(),
-    province: (addr.province || user.address?.province || "Đà Nẵng").trim(),
-    district: (addr.district || user.address?.district || "Hải Châu").trim(),
-    ward: (addr.ward || user.address?.ward || "Hải Châu 1").trim(),
-    detail: (
-      addr.detail ||
-      (typeof user.address === "string" ? user.address : user.address?.detail) ||
-      "48 Bạch Đằng, Tầng 4 Archive Suite"
-    ).trim(),
-  };
-
-  // 6. Tạo mã đơn hàng độc bản
-  const orderCode = `TRF-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-  const provenanceVaultCertId = `PRV-VAULT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-
-  const isDirectDeliver = paymentMethod === "COD" || paymentMethod === "TEST" || paymentMethod === "DIRECT";
-  const now = new Date();
-  const initialTimeline = isDirectDeliver
-    ? [
-        {
-          status: "PENDING_PAYMENT",
-          title: "Khởi tạo phiên đặt đơn THRIFT",
-          description: "Đơn mua đã được tạo thành công trên hệ thống ReUse Hub.",
-          timestamp: new Date(now.getTime() - 3600000 * 3),
-        },
-        {
-          status: "PAID",
-          title: "Thanh toán Smart Escrow (VNPay Lock)",
-          description: `Đã niêm phong ${totalAmount.toLocaleString("vi-VN")}₫ qua hợp đồng thông minh Smart Escrow.`,
-          timestamp: new Date(now.getTime() - 3600000 * 2),
-        },
-        {
-          status: "PROCESSING",
-          title: "Atelier Thẩm định & Niêm phong sáp",
-          description: "Kiểm tra phòng Lab Collimator đạt chuẩn 100%. Niêm phong sáp yếm khí hoàn tất (Tự động thông qua cho Test User).",
-          timestamp: new Date(now.getTime() - 3600000 * 1.5),
-        },
-        {
-          status: "SHIPPED",
-          title: "Vận chuyển bọc thép Nanuk 935",
-          description: "Bưu tá chuyên trách Viettel Armored Transit đã bàn giao vali bọc thép.",
-          timestamp: new Date(now.getTime() - 3600000 * 0.5),
-        },
-        {
-          status: "DELIVERED",
-          title: "Đã giao hàng · Cửa sổ đối kiểm 72H đang mở",
-          description: "Đã giao hàng tận tay an toàn. Quý khách có trọn vẹn 72 giờ đối kiểm độc lập trước khi Smart Escrow giải ngân.",
-          timestamp: now,
-        },
-      ]
-    : [
-        {
-          status: "PENDING_PAYMENT",
-          title: "Khởi tạo phiên đặt đơn THRIFT",
-          description: "Đơn mua đã được tạo thành công trên hệ thống ReUse Hub. Đang giữ chỗ hiện vật trong 15 phút.",
-          timestamp: now,
-        },
-      ];
-
-  const newOrder = await ThriftOrder.create({
-    orderCode,
-    buyerId,
-    shopOwnerId,
-    items: orderItems,
-    itemsSubtotal,
-    shippingFee,
-    totalAmount,
-    shippingAddress: effectiveAddress,
-    status: isDirectDeliver ? "DELIVERED" : "PENDING_PAYMENT",
-    paymentStatus: isDirectDeliver ? "PAID" : "PENDING",
-    paymentMethod,
-    trackingCode: `WG-${orderCode}`,
-    courierName: "Bưu tá bảo hiểm bọc thép White-Glove Insured Secondhand Courier",
-    escrowStatus: isDirectDeliver ? "HELD_72H" : "PENDING",
-    provenanceVaultCertId,
-    note,
-    timeline: initialTimeline,
+  // 3. Truy vấn các listings từ DB
+  const listings = await ThriftListing.find({
+    _id: { $in: targetListingIds },
   });
 
-  // 7. Cập nhật tồn kho trong DB: Trừ số lượng tồn kho (khi user 1 mua thành công thì tồn kho -1, user 2 thấy ngay)
-  try {
-    for (const it of orderItems) {
-      if (it.listingId && mongoose.Types.ObjectId.isValid(it.listingId)) {
-        const listing = await ThriftListing.findById(it.listingId);
-        if (listing) {
-          const qtyToDeduct = it.quantity || 1;
-          const currentQty =
-            listing.quantity !== undefined
-              ? listing.quantity
-              : listing.sourceType === "RENTAL_PRODUCT"
-              ? 1
-              : 10;
-          const newQty = Math.max(0, currentQty - qtyToDeduct);
-          listing.quantity = newQty;
+  if (listings.length !== targetListingIds.length) {
+    throw createError(
+      "Một hoặc nhiều sản phẩm thanh lý không tồn tại",
+      404,
+      "PRODUCT_NOT_FOUND"
+    );
+  }
 
-          // Nếu hàng chuyển từ RENT sang THRIFT (độc bản 1-of-1) hoặc số lượng về 0 => ngừng bán (status = 'SOLD')
-          if (listing.sourceType === "RENTAL_PRODUCT" || newQty === 0) {
-            listing.status = "SOLD";
-          }
-          await listing.save();
-        }
+  // AC: Không thể mua listing đã SOLD
+  const soldListings = listings.filter((l) => l.status === "SOLD");
+  if (soldListings.length > 0) {
+    throw createError(
+      `Không thể mua sản phẩm đã bán: ${soldListings.map((l) => l.name).join(", ")}`,
+      400,
+      "LISTING_ALREADY_SOLD"
+    );
+  }
+
+  // Kiểm tra trạng thái listing phải là APPROVED
+  const unapprovedListings = listings.filter((l) => l.status !== "APPROVED");
+  if (unapprovedListings.length > 0) {
+    throw createError(
+      `Sản phẩm thanh lý chưa sẵn sàng để giao dịch: ${unapprovedListings.map((l) => l.name).join(", ")}`,
+      400,
+      "LISTING_NOT_AVAILABLE"
+    );
+  }
+
+  // 4. Chuẩn hóa địa chỉ giao hàng
+  const finalAddress = {
+    recipientName: (shippingAddress?.recipientName || user.fullName || "Khách hàng").trim(),
+    recipientPhone: (shippingAddress?.recipientPhone || user.phoneNumber || user.phone || "0900000000").trim(),
+    province: (shippingAddress?.province || user.address?.province || DEFAULT_SHOP_PROVINCE).trim(),
+    district: (shippingAddress?.district || user.address?.district || "Quận 1").trim(),
+    ward: (shippingAddress?.ward || user.address?.ward || "Phường Bến Nghé").trim(),
+    detail: (shippingAddress?.detail || user.address?.detail || "Địa chỉ mặc định").trim(),
+  };
+
+  if (!finalAddress.recipientName || !finalAddress.recipientPhone || !finalAddress.province) {
+    throw createError("Vui lòng cung cấp đầy đủ thông tin địa chỉ giao hàng", 400, "INVALID_SHIPPING_ADDRESS");
+  }
+
+  // 5. Tính toán tài chính
+  // Tổng giá sản phẩm: mỗi listing là độc bản quantity = 1
+  let itemsTotal = 0;
+  const orderItems = listings.map((l) => {
+    itemsTotal += l.price;
+    return {
+      listingId: l._id,
+      productId: l._id,
+      name: l.name,
+      price: l.price,
+      quantity: 1, // Độc bản quantity = 1
+      condition: l.condition || "",
+      images: l.images || [],
+      sellerId: l.ownerId,
+      ownerId: l.ownerId,
+    };
+  });
+
+  // AC: Phí shipping chỉ tính MỘT LẦN cho toàn bộ order
+  let shippingFee = 0;
+  if (customShippingFee !== undefined && customShippingFee !== null && !isNaN(Number(customShippingFee))) {
+    shippingFee = Math.max(0, Number(customShippingFee));
+  } else {
+    // Tự động tính phí shipping dựa trên vùng giữa Shop/Seller và User
+    let sellerProvince = DEFAULT_SHOP_PROVINCE;
+    const firstOwnerId = listings[0]?.ownerId;
+    if (firstOwnerId) {
+      const owner = await User.findById(firstOwnerId).select("address");
+      if (owner?.address?.province) {
+        sellerProvince = owner.address.province;
       }
     }
-  } catch (stockErr) {
-    console.error("Lỗi khi cập nhật tồn kho thrift:", stockErr);
+
+    try {
+      shippingFee = calculateShippingFee(sellerProvince, finalAddress.province);
+    } catch {
+      // Phí tiêu chuẩn vùng liên tỉnh
+      shippingFee = 35000;
+    }
   }
 
-  // 8. Xóa các item đã mua khỏi Cart nếu có
-  try {
-    const purchasedListingIds = orderItems.map((it) => it.listingId).filter(Boolean);
-    await Cart.updateOne(
-      { userId: buyerId },
-      { $pull: { thriftItems: { productId: { $in: purchasedListingIds } } } }
-    );
-  } catch (err) {
-    console.error("Lỗi khi dọn giỏ hàng thrift:", err);
-  }
+  // totalAmount = tổng giá sản phẩm + 1 lần phí shipping
+  const totalAmount = itemsTotal + shippingFee;
 
-  return newOrder;
+  // 6. Tạo ThriftOrder
+  const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const orderCode = `TO-${Date.now()}-${randomSuffix}`;
+
+  const order = await ThriftOrder.create({
+    orderCode,
+    buyerId: user._id,
+    userId: user._id,
+    items: orderItems,
+    itemsTotal,
+    subtotal: itemsTotal,
+    shippingFee,
+    totalAmount,
+    shippingAddress: finalAddress,
+    status: THRIFT_ORDER_STATUS.PENDING,
+    paymentStatus: "PENDING",
+    paymentMethod,
+    note: (note || "").trim(),
+  });
+
+  // 7. Xóa các THRIFT items đã checkout khỏi giỏ hàng của user
+  await removeThriftItems(
+    user._id,
+    listings.map((l) => l._id)
+  );
+
+  return order;
 };
 
 /**
- * Lấy danh sách đơn mua THRIFT của người dùng
+ * Khóa Sản phẩm Đã bán (Atomic Lock) & Đánh dấu ThriftOrder thành PAID
+ * AC:
+ * - Sau khi thanh toán thành công, tất cả listing trong order được chuyển sang SOLD.
+ * - Thanh toán thành công phải khóa tất cả listings của order và không tạo duplicate sale.
  */
-export const getMyThriftOrdersService = async (
-  buyerId,
-  { page = 1, limit = 10, status, search } = {}
-) => {
-  const query = { buyerId };
+export const lockAndMarkOrderPaid = async (orderIdOrCode, paymentDetails = {}) => {
+  let order = null;
 
-  if (status && status !== "ALL") {
-    query.status = status;
+  if (mongoose.Types.ObjectId.isValid(orderIdOrCode)) {
+    order = await ThriftOrder.findById(orderIdOrCode);
+  }
+  if (!order) {
+    order = await ThriftOrder.findOne({ orderCode: orderIdOrCode });
+  }
+  if (!order) {
+    throw createError("Đơn hàng thanh lý không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  if (search && search.trim()) {
-    const s = search.trim();
-    query.$or = [
-      { orderCode: { $regex: s, $options: "i" } },
-      { "items.productName": { $regex: s, $options: "i" } },
-      { trackingCode: { $regex: s, $options: "i" } },
-    ];
+  // 1. Kiểm tra Idempotent: Nếu đơn đã thanh toán trước đó, không làm lại
+  if (order.paymentStatus === "PAID" || order.status === THRIFT_ORDER_STATUS.PAID) {
+    return order;
   }
 
-  const skip = (Number(page) - 1) * Number(limit);
+  // 2. Atomic Lock trên cấp Order:
+  // Đảm bảo chỉ 1 luồng duy nhất (IPN hoặc Return callback) có thể claim order
+  const claimedOrder = await ThriftOrder.findOneAndUpdate(
+    { _id: order._id, paymentStatus: { $ne: "PAID" } },
+    {
+      $set: {
+        paymentStatus: "PAID",
+        status: THRIFT_ORDER_STATUS.PAID,
+        paidAt: new Date(),
+        transactionNo: paymentDetails.transactionNo || order.transactionNo || "",
+        bankCode: paymentDetails.bankCode || order.bankCode || "",
+      },
+    },
+    { new: true }
+  );
+
+  if (!claimedOrder) {
+    // Đã có luồng song song khác claim và xử lý thành công
+    return await ThriftOrder.findById(order._id);
+  }
+
+  // 3. Atomic Lock trên từng Listing:
+  // Cập nhật điều kiện { _id: listingId, status: { $ne: "SOLD" } }
+  // Để không cho phép bán trùng (duplicate sale) nếu có 2 đơn song song
+  const listingIds = order.items.map((item) => item.listingId || item.productId);
+  const lockedListingIds = [];
+  let lockFailed = false;
+  let conflictedListingId = null;
+
+  for (const listingId of listingIds) {
+    const locked = await ThriftListing.findOneAndUpdate(
+      { _id: listingId, status: { $ne: "SOLD" } },
+      { $set: { status: "SOLD" } },
+      { new: true }
+    );
+
+    if (!locked) {
+      lockFailed = true;
+      conflictedListingId = listingId;
+      break;
+    }
+    lockedListingIds.push(listingId);
+  }
+
+  // 4. Nếu phát hiện xung đột (có sản phẩm đã bị bán bởi đơn khác trước đó):
+  if (lockFailed) {
+    // Rollback các sản phẩm đã khóa trong lượt này lại trạng thái APPROVED
+    if (lockedListingIds.length > 0) {
+      await ThriftListing.updateMany(
+        { _id: { $in: lockedListingIds } },
+        { $set: { status: "APPROVED" } }
+      );
+    }
+
+    // Đánh dấu đơn này FAILED do tranh chấp sản phẩm đã bán
+    await ThriftOrder.findByIdAndUpdate(order._id, {
+      $set: {
+        status: THRIFT_ORDER_STATUS.CANCELLED,
+        paymentStatus: "FAILED",
+        cancellationReason: `Sản phẩm ${conflictedListingId} đã được mua bởi người khác`,
+      },
+    });
+
+    throw createError(
+      "Không thể hoàn tất đơn hàng vì một hoặc nhiều sản phẩm đã được bán cho người khác",
+      409,
+      "LISTING_ALREADY_SOLD"
+    );
+  }
+
+  return claimedOrder;
+};
+
+/**
+ * Lấy chi tiết đơn hàng THRIFT (Bảo vệ IDOR)
+ */
+export const getThriftOrderById = async (orderId, user) => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ORDER_ID");
+  }
+
+  const order = await ThriftOrder.findById(orderId)
+    .populate("buyerId", "fullName email phoneNumber")
+    .populate("items.listingId");
+
+  if (!order) {
+    throw createError("Đơn hàng thanh lý không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  // AC: Chặn IDOR - Chỉ chính chủ buyer, seller sở hữu item, hoặc ADMIN mới xem được
+  const buyerIdStr = order.buyerId?._id ? order.buyerId._id.toString() : order.buyerId.toString();
+  const isBuyer = buyerIdStr === user._id.toString();
+  const isAdmin = user.role === "ADMIN";
+  const isSeller = order.items.some(
+    (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
+  );
+
+  if (!isBuyer && !isAdmin && !isSeller) {
+    throw createError("Bạn không có quyền xem đơn hàng này", 403, "FORBIDDEN");
+  }
+
+  return order;
+};
+
+/**
+ * Lấy danh sách đơn hàng THRIFT của người mua (User)
+ */
+export const getMyThriftOrders = async (user, { status, page = 1, limit = 20 } = {}) => {
+  const filter = { buyerId: user._id };
+  if (status) {
+    filter.status = status;
+  }
+
+  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+  const parsedLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+  const skip = (parsedPage - 1) * parsedLimit;
 
   const [orders, total] = await Promise.all([
-    ThriftOrder.find(query)
-      .populate("shopOwnerId", "fullName email phoneNumber avatarUrl")
-      .populate("items.listingId", "name price condition images location")
+    ThriftOrder.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(Number(limit)),
-    ThriftOrder.countDocuments(query),
+      .limit(parsedLimit)
+      .populate("items.listingId"),
+    ThriftOrder.countDocuments(filter),
   ]);
 
   return {
     orders,
     pagination: {
-      page: Number(page),
-      limit: Number(limit),
       total,
-      totalPages: Math.ceil(total / Number(limit)),
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages: Math.ceil(total / parsedLimit),
     },
   };
 };
 
 /**
- * Lấy chi tiết đơn mua THRIFT theo ID hoặc OrderCode
+ * Lấy danh sách đơn hàng THRIFT dành cho Shop Owner (người bán đồ thanh lý)
  */
-export const getThriftOrderByIdService = async (orderId, user) => {
-  assertValidOrderId(orderId);
-
-  let order = null;
-  const cleanId = String(orderId).trim().replace("#", "");
-
-  if (mongoose.Types.ObjectId.isValid(cleanId)) {
-    order = await ThriftOrder.findById(cleanId)
-      .populate("buyerId", "fullName email phoneNumber address avatarUrl")
-      .populate("shopOwnerId", "fullName email phoneNumber address avatarUrl")
-      .populate("items.listingId", "name price condition images location");
+export const getSellerThriftOrders = async (user, { status, page = 1, limit = 20 } = {}) => {
+  const filter = {
+    $or: [{ "items.sellerId": user._id }, { "items.ownerId": user._id }],
+  };
+  if (status) {
+    filter.status = status;
   }
 
-  if (!order) {
-    order = await ThriftOrder.findOne({
-      $or: [{ orderCode: orderId }, { orderCode: `#${cleanId}` }, { orderCode: cleanId }],
-    })
-      .populate("buyerId", "fullName email phoneNumber address avatarUrl")
-      .populate("shopOwnerId", "fullName email phoneNumber address avatarUrl")
-      .populate("items.listingId", "name price condition images location");
-  }
+  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+  const parsedLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+  const skip = (parsedPage - 1) * parsedLimit;
 
-  if (!order) {
-    throw createError("Không tìm thấy đơn hàng THRIFT", 404, "ORDER_NOT_FOUND");
-  }
+  const [orders, total] = await Promise.all([
+    ThriftOrder.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parsedLimit)
+      .populate("buyerId", "fullName email phoneNumber")
+      .populate("items.listingId"),
+    ThriftOrder.countDocuments(filter),
+  ]);
 
-  const userId = user._id.toString();
-  const isBuyer = order.buyerId?._id?.toString() === userId || order.buyerId?.toString() === userId;
-  const isSeller = order.shopOwnerId?._id?.toString() === userId || order.shopOwnerId?.toString() === userId;
-  const isAdmin = user.role === "ADMIN";
-
-  if (!isBuyer && !isSeller && !isAdmin) {
-    throw createError("Bạn không có quyền xem thông tin đơn hàng này", 403, "FORBIDDEN");
-  }
-
-  return order;
+  return {
+    orders,
+    pagination: {
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages: Math.ceil(total / parsedLimit),
+    },
+  };
 };
 
 /**
- * Hủy đơn mua THRIFT
+ * Hủy đơn hàng THRIFT (chỉ khi đơn chưa thanh toán)
  */
-export const cancelThriftOrderService = async (orderId, user, reason = "") => {
-  const order = await getThriftOrderByIdService(orderId, user);
+export const cancelThriftOrder = async (orderId, user, reason = "") => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ORDER_ID");
+  }
 
-  if (["SHIPPED", "DELIVERED", "COMPLETED", "CANCELLED"].includes(order.status)) {
+  const order = await ThriftOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng thanh lý không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  const buyerIdStr = order.buyerId.toString();
+  const isBuyer = buyerIdStr === user._id.toString();
+  const isAdmin = user.role === "ADMIN";
+
+  if (!isBuyer && !isAdmin) {
+    throw createError("Bạn không có quyền hủy đơn hàng này", 403, "FORBIDDEN");
+  }
+
+  if (order.status !== THRIFT_ORDER_STATUS.PENDING && order.status !== THRIFT_ORDER_STATUS.WAITING_PAYMENT) {
     throw createError(
-      `Không thể hủy đơn hàng đang ở trạng thái ${order.status}`,
+      `Không thể hủy đơn hàng ở trạng thái ${order.status}`,
       400,
-      "ORDER_CANNOT_BE_CANCELLED"
+      "INVALID_ORDER_STATUS_FOR_CANCEL"
     );
   }
 
-  order.status = "CANCELLED";
-  order.cancelReason = reason || "Khách hàng yêu cầu hủy đơn";
-  if (order.paymentStatus === "PAID") {
-    order.paymentStatus = "REFUNDED";
-    order.escrowStatus = "REFUNDED";
+  order.status = THRIFT_ORDER_STATUS.CANCELLED;
+  order.cancelledAt = new Date();
+  order.cancellationReason = reason || "Khách hàng hủy đơn";
+  await order.save();
+
+  return order;
+};
+
+/**
+ * Cập nhật trạng thái xử lý vận chuyển đơn hàng THRIFT (Shop Owner / Admin)
+ */
+export const updateThriftOrderStatus = async (orderId, user, nextStatus) => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ORDER_ID");
   }
 
-  order.timeline.push({
-    status: "CANCELLED",
-    title: "Đã hủy đơn mua THRIFT",
-    description: `Đơn hàng đã được hủy. Lý do: ${order.cancelReason}`,
-    timestamp: new Date(),
-  });
-
-  // Khôi phục số lượng tồn kho khi đơn bị hủy
-  try {
-    for (const it of order.items) {
-      if (it.listingId) {
-        const listing = await ThriftListing.findById(it.listingId);
-        if (listing) {
-          listing.quantity = (listing.quantity || 0) + (it.quantity || 1);
-          if (listing.status === "SOLD") {
-            listing.status = "APPROVED";
-          }
-          await listing.save();
-        }
-      }
-    }
-  } catch (stockErr) {
-    console.error("Lỗi khi khôi phục tồn kho khi hủy đơn:", stockErr);
+  const order = await ThriftOrder.findById(orderId);
+  if (!order) {
+    throw createError("Đơn hàng thanh lý không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  await order.save();
-  return order;
-};
+  const isAdmin = user.role === "ADMIN";
+  const isSeller = order.items.some(
+    (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
+  );
 
-/**
- * Người mua xác nhận đã nhận hàng & hoàn tất đối soát 72h
- */
-export const confirmDeliveredThriftOrderService = async (orderId, user) => {
-  const order = await getThriftOrderByIdService(orderId, user);
-
-  order.status = "COMPLETED";
-  order.escrowStatus = "RELEASED";
-  order.timeline.push({
-    status: "COMPLETED",
-    title: "Xác lập quyền sở hữu vĩnh viễn & Giải phóng Escrow",
-    description: `Khách hàng đã hoàn tất nghiệm thu đối soát. Kích hoạt chứng thư số ${order.provenanceVaultCertId} vĩnh viễn trong Provenance Vault™.`,
-    timestamp: new Date(),
-  });
-
-  await order.save();
-  return order;
-};
-
-/**
- * Cập nhật trạng thái đơn hàng (Dành cho Người bán / Admin)
- */
-export const updateThriftOrderStatusService = async (
-  orderId,
-  user,
-  { status, trackingCode, courierName, note } = {}
-) => {
-  const order = await getThriftOrderByIdService(orderId, user);
-
-  if (trackingCode) order.trackingCode = trackingCode;
-  if (courierName) order.courierName = courierName;
-  if (note) order.note = note;
-
-  if (status && status !== order.status) {
-    order.status = status;
-
-    if (status === "PAID") {
-      order.paymentStatus = "PAID";
-      order.escrowStatus = "HELD_72H";
-      order.timeline.push({
-        status: "PAID",
-        title: "Thanh toán hoàn tất · Ký quỹ Escrow 72H",
-        description: "Đã nhận thanh toán qua VNPay. Số tiền được bảo lưu ký quỹ 72 giờ độc lập.",
-        timestamp: new Date(),
-      });
-    } else if (status === "PROCESSING") {
-      order.timeline.push({
-        status: "PROCESSING",
-        title: "Đóng gói bọc thép & Niêm phong Vault",
-        description: "Hiện vật đang được kiểm định lần cuối, đóng gói thùng gỗ đệm bọc thép và niêm phong chứng thư số.",
-        timestamp: new Date(),
-      });
-    } else if (status === "SHIPPED") {
-      order.timeline.push({
-        status: "SHIPPED",
-        title: "Bưu tá White-Glove đang vận chuyển",
-        description: `Đơn hàng đã giao cho bưu tá chuyên dụng. Mã vận đơn: ${order.trackingCode || "WG-" + order.orderCode}.`,
-        timestamp: new Date(),
-      });
-    } else if (status === "DELIVERED") {
-      order.escrowExpiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
-      order.timeline.push({
-        status: "DELIVERED",
-        title: "Giao hàng thành công · Kích hoạt 72H Đối soát",
-        description: "Kiện hàng đã được bàn giao tận tay kèm biên bản nghiệm thu. Bắt đầu đếm ngược 72 giờ kiểm tra độc lập.",
-        timestamp: new Date(),
-      });
-    } else if (status === "COMPLETED") {
-      order.escrowStatus = "RELEASED";
-      order.timeline.push({
-        status: "COMPLETED",
-        title: "Hoàn tất giao dịch · Cấp chứng thư số Provenance Vault™",
-        description: "Giao dịch đã kết thúc thành công. Đã giải phóng ký quỹ Smart Escrow cho người bán.",
-        timestamp: new Date(),
-      });
-    }
+  if (!isAdmin && !isSeller) {
+    throw createError("Chỉ người bán của đơn hàng hoặc Admin mới có quyền cập nhật trạng thái", 403, "FORBIDDEN");
   }
 
+  const validStatuses = Object.values(THRIFT_ORDER_STATUS);
+  if (!validStatuses.includes(nextStatus)) {
+    throw createError(`Trạng thái không hợp lệ: ${nextStatus}`, 400, "INVALID_STATUS");
+  }
+
+  order.status = nextStatus;
   await order.save();
+
   return order;
-};
-
-
-/**
- * Khiếu nại / Yêu cầu đối soát và đóng băng Escrow
- */
-export const disputeThriftOrderService = async (orderId, user, { reason = "", itemId } = {}) => {
-  const order = await getThriftOrderByIdService(orderId, user);
-
-  order.status = "DISPUTED";
-  order.disputeReason = reason || "Khách hàng yêu cầu đối soát độc lập trong 72h";
-  order.timeline.push({
-    status: "DISPUTED",
-    title: "Mở hồ sơ đối soát & Tạm dừng giải ngân Escrow",
-    description: `Khách hàng yêu cầu đối soát hiện vật. Lý do: ${order.disputeReason}. Hệ thống đã đóng băng quỹ ${order.totalAmount.toLocaleString('vi-VN')}₫ tại Smart Escrow.`,
-    timestamp: new Date(),
-  });
-
-  await order.save();
-  return order;
-};
-
-/**
- * Đánh giá hiện vật THRIFT
- */
-export const reviewThriftOrderService = async (orderId, user, { rating = 5, comment = "", images = [] } = {}) => {
-  const order = await getThriftOrderByIdService(orderId, user);
-
-  if (!order.reviews) order.reviews = [];
-  order.reviews.push({
-    rating: Number(rating) || 5,
-    comment,
-    images: Array.isArray(images) ? images : [],
-    createdAt: new Date(),
-  });
-
-  order.timeline.push({
-    status: order.status,
-    title: "Đánh giá hiện vật & Atelier",
-    description: `Khách hàng ${user.fullName || "Elena Rostova"} đã để lại đánh giá ${rating}/5 sao cho hiện vật.`,
-    timestamp: new Date(),
-  });
-
-  await order.save();
-  return order;
-};
-
-
-export default {
-  createThriftOrderService,
-  getMyThriftOrdersService,
-  getThriftOrderByIdService,
-  cancelThriftOrderService,
-  confirmDeliveredThriftOrderService,
-  updateThriftOrderStatusService,
-  disputeThriftOrderService,
-  reviewThriftOrderService,
 };

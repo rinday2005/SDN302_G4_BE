@@ -51,17 +51,41 @@ const assertRentProductAddable = async (productId, quantity) => {
   }
 };
 
+/**
+ * Kiểm tra sản phẩm THRIFT tồn tại, đã duyệt và chưa bị bán (SOLD).
+ * Mỗi listing THRIFT là sản phẩm độc bản (quantity tối đa = 1).
+ */
+const assertThriftListingAddable = async (productId, quantity) => {
+  const listing = await ThriftListing.findById(productId);
+  if (!listing) {
+    throw createError("Sản phẩm thanh lý không tồn tại", 404, "PRODUCT_NOT_FOUND");
+  }
+  if (listing.status === "SOLD") {
+    throw createError("Sản phẩm thanh lý đã được bán", 400, "LISTING_ALREADY_SOLD");
+  }
+  if (listing.status !== "APPROVED") {
+    throw createError("Sản phẩm thanh lý chưa sẵn sàng để bán", 400, "LISTING_NOT_AVAILABLE");
+  }
+  if (quantity > 1) {
+    throw createError(
+      "Sản phẩm thanh lý là độc bản, số lượng tối đa là 1",
+      400,
+      "QUANTITY_EXCEEDS_STOCK"
+    );
+  }
+};
+
 const getCart = async (userId) => {
   await getOrCreateCart(userId);
 
   return Cart.findOne({ userId })
     .populate(
       "rentItems.productId",
-      "name pricePerDay depositAmount images status totalQuantity ownerId location categoryId"
+      "name pricePerDay depositAmount images status totalQuantity ownerId"
     )
     .populate(
       "thriftItems.productId",
-      "name price images condition status location ownerId categoryId"
+      "name price condition images status ownerId categoryId location description sourceType"
     );
 };
 
@@ -74,6 +98,8 @@ const addItem = async (userId, { type = "RENT", productId, quantity = 1 }) => {
 
   if (type === "RENT") {
     await assertRentProductAddable(productId, newQuantity);
+  } else if (type === "THRIFT") {
+    await assertThriftListingAddable(productId, newQuantity);
   }
 
   if (existing) {
@@ -97,6 +123,8 @@ const updateItemQuantity = async (userId, { type = "RENT", productId, quantity }
 
   if (type === "RENT") {
     await assertRentProductAddable(productId, quantity);
+  } else if (type === "THRIFT") {
+    await assertThriftListingAddable(productId, quantity);
   }
 
   existing.quantity = quantity;
@@ -125,4 +153,19 @@ const removeItem = async (userId, { type = "RENT", productId }) => {
 const removeRentItems = async (userId, productIds) =>
   Cart.updateOne({ userId }, { $pull: { rentItems: { productId: { $in: productIds } } } });
 
-export { getCart, addItem, updateItemQuantity, removeItem, removeRentItems };
+/**
+ * Loại các THRIFT items đã checkout khỏi Cart
+ */
+const removeThriftItems = async (userId, productIds) =>
+  Cart.updateOne({ userId }, { $pull: { thriftItems: { productId: { $in: productIds } } } });
+
+export {
+  getCart,
+  addItem,
+  updateItemQuantity,
+  removeItem,
+  removeRentItems,
+  removeThriftItems,
+  assertThriftListingAddable,
+};
+

@@ -1,88 +1,45 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const thriftListingSchema = new mongoose.Schema(
   {
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'ownerId là bắt buộc'],
+      ref: "User",
+      required: [true, "ownerId là bắt buộc"],
       index: true,
-    },
-    sourceType: {
-      type: String,
-      enum: {
-        values: ['NEW', 'RENTAL_PRODUCT', 'USED_DIRECT'],
-        message: 'sourceType không hợp lệ',
-      },
-      default: 'NEW',
-      required: true,
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: [0, 'Số lượng tồn kho không được âm'],
-      default: 10,
-    },
-    sizes: {
-      type: [String],
-      default: ['S', 'M', 'L', 'XL'],
-    },
-    size: {
-      type: String,
-      default: 'L',
-    },
-    sourceRentalProductId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'RentalProduct',
-      default: null,
     },
     name: {
       type: String,
-      required: [true, 'Tên sản phẩm thanh lý là bắt buộc'],
+      required: [true, "Tên sản phẩm thanh lý không được để trống"],
       trim: true,
-      index: true,
-    },
-    slug: {
-      type: String,
-      trim: true,
-      index: true,
     },
     description: {
       type: String,
       trim: true,
-      default: '',
     },
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Category',
-      required: [true, 'categoryId là bắt buộc'],
+      ref: "Category",
+      required: [true, "categoryId là bắt buộc"],
       index: true,
     },
     price: {
       type: Number,
-      required: [true, 'Giá bán thanh lý là bắt buộc'],
-      min: [0, 'Giá bán phải lớn hơn hoặc bằng 0'],
+      required: [true, "Giá bán là bắt buộc"],
+      min: [0, "Giá bán không được âm"],
     },
     condition: {
       type: String,
-      required: [true, 'Tình trạng đồ cũ là bắt buộc'],
+      required: [true, "Tình trạng sản phẩm là bắt buộc"],
       trim: true,
-      default: 'Rất tốt (95%)',
     },
     images: {
       type: [String],
-      validate: {
-        validator: function (val) {
-          return Array.isArray(val) && val.length > 0;
-        },
-        message: 'Sản phẩm phải có ít nhất 1 hình ảnh',
-      },
+      default: [],
     },
     location: {
       type: String,
-      required: [true, 'Địa chỉ shop/kho là bắt buộc'],
       trim: true,
-      default: 'Đà Nẵng',
     },
     status: {
       type: String,
@@ -93,13 +50,14 @@ const thriftListingSchema = new mongoose.Schema(
       default: 'APPROVED',
       index: true,
     },
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
+    sourceType: {
+      type: String,
+      enum: ["MANUAL", "FROM_RENTAL", "RENTAL_PRODUCT"],
+      default: "MANUAL",
     },
-    approvedAt: {
-      type: Date,
+    sourceRentalProductId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "RentalProduct",
       default: null,
     },
     rejectionReason: {
@@ -110,13 +68,8 @@ const thriftListingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    collection: 'thriftListings',
   }
 );
 
-thriftListingSchema.index({ ownerId: 1, status: 1 });
-thriftListingSchema.index({ categoryId: 1, status: 1 });
-thriftListingSchema.index({ name: 'text' });
-
-export const ThriftListing = mongoose.model('ThriftListing', thriftListingSchema);
+const ThriftListing = mongoose.model("ThriftListing", thriftListingSchema);
 export default ThriftListing;

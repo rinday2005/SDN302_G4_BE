@@ -2,45 +2,49 @@ import { Router } from "express";
 import authMiddleware from "../../../middleware/auth.middleware.js";
 import authorize from "../../../middleware/role.middleware.js";
 import {
-  createThriftOrderController,
-  getMyThriftOrdersController,
-  getThriftOrderByIdController,
-  cancelThriftOrderController,
-  confirmDeliveredThriftOrderController,
-  updateThriftOrderStatusController,
-  disputeThriftOrderController,
-  reviewThriftOrderController,
+  checkoutThriftOrder,
+  lockAndMarkOrderPaid,
+  getMyThriftOrders,
+  getSellerThriftOrders,
+  getThriftOrderById,
+  cancelThriftOrder,
+  updateThriftOrderStatus,
 } from "./thriftOrder.controller.js";
+import {
+  validateCheckoutThriftOrder,
+  validateUpdateThriftOrderStatus,
+} from "./thriftOrder.validation.js";
 
 const router = Router();
 
-// Toàn bộ API đơn mua THRIFT yêu cầu đăng nhập
+// Tất cả route thrift orders yêu cầu đăng nhập
 router.use(authMiddleware);
 
-// Tạo đơn mua THRIFT
-router.post("/", createThriftOrderController);
+// [BE-S4-05] API Đặt mua Đồ THRIFT
+router.post("/", validateCheckoutThriftOrder, checkoutThriftOrder);
+router.post("/checkout", validateCheckoutThriftOrder, checkoutThriftOrder);
 
-// Khách hàng xem danh sách đơn mua THRIFT của mình
-router.get("/my-orders", getMyThriftOrdersController);
+// Xem danh sách đơn của người mua
+router.get("/my-orders", getMyThriftOrders);
 
-// Xem chi tiết đơn mua THRIFT theo ID hoặc OrderCode
-router.get("/:id", getThriftOrderByIdController);
+// Xem danh sách đơn của người bán (Shop Owner)
+router.get("/seller-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
 
-// Khách hàng hủy đơn mua
-router.post("/:id/cancel", cancelThriftOrderController);
-router.patch("/:id/cancel", cancelThriftOrderController);
+// Xem chi tiết đơn hàng (Chặn IDOR)
+router.get("/:id", getThriftOrderById);
 
-// Khách hàng xác nhận đã nhận hàng & hoàn tất đối soát 72h
-router.post("/:id/confirm-delivered", confirmDeliveredThriftOrderController);
+// [BE-S4-05] Khóa Sản phẩm Đã bán (Atomic Lock) & Xác nhận thanh toán thành công
+router.post("/:id/pay", lockAndMarkOrderPaid);
 
-// Cập nhật trạng thái đơn hàng (Shop Owner / Admin)
-router.patch("/:id/status", authorize(["SHOP_OWNER", "ADMIN"]), updateThriftOrderStatusController);
+// Hủy đơn hàng
+router.post("/:id/cancel", cancelThriftOrder);
 
-
-// Khách hàng yêu cầu đối soát / khiếu nại đóng băng Escrow
-router.post("/:id/dispute", disputeThriftOrderController);
-
-// Khách hàng đánh giá hiện vật & Atelier
-router.post("/:id/review", reviewThriftOrderController);
+// Cập nhật trạng thái xử lý/vận chuyển đơn hàng (Shop Owner / Admin)
+router.patch(
+  "/:id/status",
+  authorize(["SHOP_OWNER", "ADMIN"]),
+  validateUpdateThriftOrderStatus,
+  updateThriftOrderStatus
+);
 
 export default router;

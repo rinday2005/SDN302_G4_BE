@@ -1,103 +1,69 @@
-import {
-  getThriftListings,
-  getThriftListingById,
-  createThriftListing,
-  updateThriftListing,
-  deleteThriftListing,
-} from "./thriftListing.service.js";
-import { successResponse } from "../../../utils/response.js";
+import * as thriftService from "./thriftListing.service.js";
 
-/**
- * Lấy danh sách sản phẩm thanh lý
- * GET /api/thrift/listings
- */
-export const getThriftListingsController = async (req, res, next) => {
+export const createThriftListing = async (req, res, next) => {
   try {
-    const result = await getThriftListings(req.query);
-
-    return successResponse(
-      res,
-      "Lấy danh sách sản phẩm thanh lý thành công",
-      result
-    );
+    const userId = req.user?._id || req.user?.id;
+    const listing = await thriftService.createListing(userId, req.body);
+    return res.status(201).json({
+      success: true,
+      message: "Tạo sản phẩm thanh lý thành công, đang chờ duyệt",
+      data: listing,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Lấy chi tiết sản phẩm thanh lý
- * GET /api/thrift/listings/:id
- */
-export const getThriftListingByIdController = async (req, res, next) => {
+export const updateThriftListing = async (req, res, next) => {
   try {
-    const listing = await getThriftListingById(req.params.id);
-
-    return successResponse(
-      res,
-      "Lấy chi tiết sản phẩm thanh lý thành công",
-      listing
-    );
+    const userId = req.user?._id || req.user?.id;
+    const { id } = req.params;
+    const updated = await thriftService.updateListing(id, userId, req.body);
+    return res.status(200).json({
+      success: true,
+      message: "Cập nhật sản phẩm thanh lý thành công",
+      data: updated,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Đăng bán sản phẩm thanh lý mới
- * POST /api/thrift/listings
- */
-export const createThriftListingController = async (req, res, next) => {
+export const getPublicThriftListings = async (req, res, next) => {
   try {
-    const listing = await createThriftListing(req.user, req.body);
-
-    return successResponse(
-      res,
-      "Đăng bán sản phẩm thanh lý thành công",
-      listing,
-      201
-    );
+    const listings = await thriftService.getPublicListings(req.query);
+    return res.status(200).json({
+      success: true,
+      data: listings,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Cập nhật sản phẩm thanh lý
- * PUT /api/thrift/listings/:id
- */
-export const updateThriftListingController = async (req, res, next) => {
+export const getThriftListingById = async (req, res, next) => {
   try {
-    const listing = await updateThriftListing(
-      req.params.id,
-      req.user,
-      req.body
-    );
-
-    return successResponse(
-      res,
-      "Cập nhật sản phẩm thanh lý thành công",
-      listing
-    );
+    const { id } = req.params;
+    const listing = await thriftService.getListingById(id);
+    return res.status(200).json({
+      success: true,
+      data: listing,
+    });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Ẩn hoặc xóa sản phẩm thanh lý
- * DELETE /api/thrift/listings/:id
- */
-export const deleteThriftListingController = async (req, res, next) => {
+export const convertFromRental = async (req, res, next) => {
   try {
-    const result = await deleteThriftListing(req.params.id, req.user);
-
-    return successResponse(
-      res,
-      "Xóa sản phẩm thanh lý thành công",
-      result
-    );
+    const userId = req.user?._id || req.user?.id;
+    const result = await thriftService.convertFromRental(userId, req.body);
+    return res.status(201).json({
+      success: true,
+      message: "Chuyển đổi sản phẩm sang thanh lý thành công",
+      data: result,
+    });
   } catch (error) {
     next(error);
   }
-};
+};

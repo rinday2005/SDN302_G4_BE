@@ -1,44 +1,35 @@
-import { Router } from "express";
-import authMiddleware, { optionalAuthMiddleware } from "../../../middleware/auth.middleware.js";
+import express from "express";
+import * as thriftController from "./thriftListing.controller.js";
+import authMiddleware from "../../../middleware/auth.middleware.js";
 import authorize from "../../../middleware/role.middleware.js";
-import {
-  getThriftListingsController,
-  getThriftListingByIdController,
-  createThriftListingController,
-  updateThriftListingController,
-  deleteThriftListingController,
-} from "./thriftListing.controller.js";
 
-const router = Router();
+const router = express.Router();
 
-// 1. Xem danh sách sản phẩm thanh lý (Công khai)
-router.get("/", getThriftListingsController);
+// Public: Xem danh sách bài đăng (chỉ lấy status APPROVED)
+router.get("/", thriftController.getPublicThriftListings);
+router.get("/:id", thriftController.getThriftListingById);
 
-// 2. Xem chi tiết sản phẩm thanh lý (Công khai)
-router.get("/:id", getThriftListingByIdController);
+// Private: Chỉ Shop Owner mới có quyền tạo và sửa
+// AC: User gọi API này trả 403
+router.post(
+  "/convert-from-rental",
+  authMiddleware,
+  authorize(["SHOP_OWNER"]),
+  thriftController.convertFromRental
+);
 
-// 3. Đăng bán sản phẩm thanh lý mới (Yêu cầu đăng nhập USER hoặc SHOP_OWNER)
 router.post(
   "/",
   authMiddleware,
-  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
-  createThriftListingController
+  authorize(["SHOP_OWNER"]),
+  thriftController.createThriftListing
 );
 
-// 4. Cập nhật sản phẩm thanh lý (Chủ shop hoặc Admin)
 router.put(
   "/:id",
   authMiddleware,
-  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
-  updateThriftListingController
-);
-
-// 5. Xóa / Ẩn sản phẩm thanh lý
-router.delete(
-  "/:id",
-  authMiddleware,
-  authorize(["USER", "SHOP_OWNER", "ADMIN"]),
-  deleteThriftListingController
+  authorize(["SHOP_OWNER"]),
+  thriftController.updateThriftListing
 );
 
 export default router;

@@ -1,103 +1,111 @@
-import {
-  disputeThriftOrderService,
-  reviewThriftOrderService,
-  createThriftOrderService,
-  getMyThriftOrdersService,
-  getThriftOrderByIdService,
-  cancelThriftOrderService,
-  confirmDeliveredThriftOrderService,
-  updateThriftOrderStatusService,
-} from "./thriftOrder.service.js";
+import * as thriftOrderService from "./thriftOrder.service.js";
 import { successResponse } from "../../../utils/response.js";
 
-export const createThriftOrderController = async (req, res, next) => {
+export const checkoutThriftOrder = async (req, res, next) => {
   try {
-    const order = await createThriftOrderService({
+    const order = await thriftOrderService.checkoutThriftOrder({
       user: req.user,
-      items: req.body.items,
+      listingIds: req.body.listingIds,
       shippingAddress: req.body.shippingAddress,
+      shippingFee: req.body.shippingFee,
+      paymentMethod: req.body.paymentMethod,
       note: req.body.note,
-      paymentMethod: req.body.paymentMethod || "VNPAY",
     });
 
-    return successResponse(res, "Tạo đơn mua THRIFT thành công", order, 201);
+    return successResponse(
+      res,
+      "Tạo đơn hàng thanh lý thành công",
+      order,
+      201
+    );
   } catch (error) {
     next(error);
   }
 };
 
-export const getMyThriftOrdersController = async (req, res, next) => {
+export const lockAndMarkOrderPaid = async (req, res, next) => {
   try {
-    const result = await getMyThriftOrdersService(req.user._id, req.query);
-    return successResponse(res, "Lấy danh sách đơn mua THRIFT thành công", result);
+    const { id } = req.params;
+    const paidOrder = await thriftOrderService.lockAndMarkOrderPaid(id, req.body);
+
+    return successResponse(
+      res,
+      "Thanh toán đơn hàng thành công, tất cả sản phẩm đã được khóa SOLD",
+      paidOrder,
+      200
+    );
   } catch (error) {
     next(error);
   }
 };
 
-export const getThriftOrderByIdController = async (req, res, next) => {
+export const getMyThriftOrders = async (req, res, next) => {
   try {
-    const order = await getThriftOrderByIdService(req.params.id, req.user);
-    return successResponse(res, "Lấy chi tiết đơn mua THRIFT thành công", order);
+    const result = await thriftOrderService.getMyThriftOrders(req.user, req.query);
+    return successResponse(
+      res,
+      "Lấy danh sách đơn hàng THRIFT của bạn thành công",
+      result.orders,
+      200
+    );
   } catch (error) {
     next(error);
   }
 };
 
-export const cancelThriftOrderController = async (req, res, next) => {
+export const getSellerThriftOrders = async (req, res, next) => {
   try {
-    const order = await cancelThriftOrderService(req.params.id, req.user, req.body.reason);
-    return successResponse(res, "Hủy đơn mua THRIFT thành công", order);
+    const result = await thriftOrderService.getSellerThriftOrders(req.user, req.query);
+    return successResponse(
+      res,
+      "Lấy danh sách đơn hàng THRIFT của shop thành công",
+      result.orders,
+      200
+    );
   } catch (error) {
     next(error);
   }
 };
 
-export const confirmDeliveredThriftOrderController = async (req, res, next) => {
+export const getThriftOrderById = async (req, res, next) => {
   try {
-    const order = await confirmDeliveredThriftOrderService(req.params.id, req.user);
-    return successResponse(res, "Xác nhận nghiệm thu & cấp chứng thư số thành công", order);
+    const { id } = req.params;
+    const order = await thriftOrderService.getThriftOrderById(id, req.user);
+    return successResponse(res, "Lấy chi tiết đơn hàng THRIFT thành công", order, 200);
   } catch (error) {
     next(error);
   }
 };
 
-export const updateThriftOrderStatusController = async (req, res, next) => {
+export const cancelThriftOrder = async (req, res, next) => {
   try {
-    const order = await updateThriftOrderStatusService(req.params.id, req.user, req.body);
-    return successResponse(res, "Cập nhật trạng thái đơn THRIFT thành công", order);
+    const { id } = req.params;
+    const cancelledOrder = await thriftOrderService.cancelThriftOrder(
+      id,
+      req.user,
+      req.body?.reason
+    );
+    return successResponse(res, "Hủy đơn hàng THRIFT thành công", cancelledOrder, 200);
   } catch (error) {
     next(error);
   }
 };
 
-
-export const disputeThriftOrderController = async (req, res, next) => {
+export const updateThriftOrderStatus = async (req, res, next) => {
   try {
-    const order = await disputeThriftOrderService(req.params.id, req.user, req.body);
-    return successResponse(res, "Đã tiếp nhận yêu cầu đối soát và tạm dừng giải ngân Escrow", order);
+    const { id } = req.params;
+    const updatedOrder = await thriftOrderService.updateThriftOrderStatus(
+      id,
+      req.user,
+      req.body?.status
+    );
+    return successResponse(
+      res,
+      "Cập nhật trạng thái đơn hàng THRIFT thành công",
+      updatedOrder,
+      200
+    );
   } catch (error) {
     next(error);
   }
-};
-
-export const reviewThriftOrderController = async (req, res, next) => {
-  try {
-    const order = await reviewThriftOrderService(req.params.id, req.user, req.body);
-    return successResponse(res, "Đăng đánh giá hiện vật thành công", order);
-  } catch (error) {
-    next(error);
-  }
-};
-
-
-export default {
-  createThriftOrderController,
-  getMyThriftOrdersController,
-  getThriftOrderByIdController,
-  cancelThriftOrderController,
-  confirmDeliveredThriftOrderController,
-  updateThriftOrderStatusController,
-  disputeThriftOrderController,
-  reviewThriftOrderController,
 };
