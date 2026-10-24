@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+﻿import mongoose from "mongoose";
 import RentalOrder, { canTransitionStatus, RENTAL_ORDER_STATUS } from "./order.model.js";
 import RentalProduct from "../product/product.model.js";
 import Cart from "../../cart/cart.model.js";
@@ -115,6 +115,7 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress }) => {
       quantity,
       pricePerDay: product.pricePerDay,
       depositAmount: product.depositAmount,
+      imageUrl: Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : "",
     };
   });
 
@@ -171,7 +172,7 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress }) => {
  * Lấy danh sách đơn thuê của Renter hiện tại
  */
 const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) => {
-  try { await RentalOrder.updateMany({ renterId, status: "PAID", "claProof.isSigned": true }, { $set: { status: "RENTING" } }); await RentalOrder.updateMany({ renterId, status: "PAID" }, { $set: { status: "DELIVERED" } }); } catch (e) {}
+  try { await RentalOrder.updateMany({ renterId, status: "PAID", "claProof.isSigned": true }, { $set: { status: "RENTING" } }); await RentalOrder.updateMany({ renterId, status: "PAID" }, { $set: { status: "DELIVERED" } }); } catch (e) { }
   const query = { renterId };
   if (status) query.status = status;
 
@@ -201,7 +202,8 @@ const getOrderById = async (orderId, user) => {
   if (mongoose.Types.ObjectId.isValid(orderId)) {
     order = await RentalOrder.findById(orderId)
       .populate("renterId", "fullName email phoneNumber")
-      .populate("shopOwnerId", "fullName email phoneNumber");
+      .populate("shopOwnerId", "fullName email phoneNumber")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location");
   }
   if (!order) {
     const clean = String(orderId || "").trim().replace("#", "");
@@ -213,7 +215,8 @@ const getOrderById = async (orderId, user) => {
       ]
     })
       .populate("renterId", "fullName email phoneNumber")
-      .populate("shopOwnerId", "fullName email phoneNumber");
+      .populate("shopOwnerId", "fullName email phoneNumber")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location");
   }
 
   if (!order) {
@@ -247,6 +250,7 @@ const getAllOrders = async (user, { page = 1, limit = 10, status } = {}) => {
   const [orders, total] = await Promise.all([
     RentalOrder.find(query)
       .populate("renterId", "fullName email phoneNumber")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit)),
