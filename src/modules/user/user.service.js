@@ -252,3 +252,12 @@ export const updateKycStatus = async (userId, data) => {
   await user.save();
   return getKycStatus(userId);
 };
+
+
+/**
+ * Get all users (Admin)
+ */
+export const getAllUsers = async (query = {}) => {
+  const users = await User.find().select("-passwordHash").sort({ createdAt: -1 });
+  return users.map(formatUserResponse);
+};

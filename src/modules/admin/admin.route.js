@@ -1,3 +1,4 @@
+import { getAllUsersController } from "../user/user.controller.js";
 import { Router } from "express";
 import authMiddleware from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
@@ -11,6 +12,8 @@ import {
   getDisputeByIdController,
   resolveDisputeController,
   getFinanceOverviewController,
+  getPlatformFeeController,
+  updatePlatformFeeController,
 } from "./admin.controller.js";
 import {
   validateReviewListing,
@@ -23,6 +26,9 @@ const adminRouter = Router();
 // AC: Chỉ ADMIN gọi được API; User/Shop Owner nhận 403; Chưa đăng nhập nhận 401
 // ============================================================================
 adminRouter.use(authMiddleware, authorize(["ADMIN"]));
+
+// Lấy danh sách toàn bộ người dùng (MongoDB)
+adminRouter.get("/users", getAllUsersController);
 
 // ============================================================================
 // 1. KIỂM DUYỆT LISTING TOÀN DIỆN (RENT & THRIFT)
@@ -59,5 +65,17 @@ adminRouter.get("/finance", getFinanceOverviewController);
 adminRouter.get("/finance/overview", getFinanceOverviewController);
 adminRouter.get("/financial-report", getFinanceOverviewController);
 adminRouter.get("/reports/finance", getFinanceOverviewController);
+
+// ============================================================================
+// 4. CẤU HÌNH TỶ LỆ % PHÍ SÀN (RENT & THRIFT)
+// ============================================================================
+adminRouter.get("/platform-fee", getPlatformFeeController);
+adminRouter.get("/fees", getPlatformFeeController);
+adminRouter.patch("/platform-fee", updatePlatformFeeController);
+adminRouter.patch("/fees", updatePlatformFeeController);
+adminRouter.put("/platform-fee", updatePlatformFeeController);
+adminRouter.put("/fees", updatePlatformFeeController);
+adminRouter.post("/platform-fee", updatePlatformFeeController);
+adminRouter.post("/fees", updatePlatformFeeController);
 
 export default adminRouter;

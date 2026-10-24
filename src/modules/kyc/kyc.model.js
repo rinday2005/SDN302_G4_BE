@@ -29,6 +29,21 @@ const kycRecordSchema = new mongoose.Schema(
       required: [true, "backImageUrl is required"],
       trim: true,
     },
+    dob: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    fullName: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    residentAddress: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     status: {
       type: String,
       enum: Object.values(KYC_STATUS),

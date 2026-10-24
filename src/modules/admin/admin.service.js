@@ -4,6 +4,7 @@ import ThriftListing from "../thrift/listing/thriftListing.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
 import ThriftOrder from "../thrift/order/thriftOrder.model.js";
 import User from "../user/user.model.js";
+import PlatformConfig from "./platformConfig.model.js";
 
 const createError = (message, statusCode = 400, errorCode = "BAD_REQUEST") => {
   const error = new Error(message);
@@ -353,7 +354,14 @@ export const getDisputeByIdService = async (orderId) => {
  */
 export const resolveDisputeService = async (
   orderId,
-  { resolution, refundToRenter = 0, payoutToShop = 0, adminNotes = "" },
+  {
+    resolution,
+    refundToRenter = 0,
+    payoutToShop = 0,
+    refundPercent = null,
+    payoutPercent = null,
+    adminNotes = "",
+  },
   adminUser
 ) => {
   if (!mongoose.Types.ObjectId.isValid(orderId)) {
@@ -365,13 +373,23 @@ export const resolveDisputeService = async (
     throw createError("Đơn hàng thuê không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
-  const refundAmt = Math.max(0, Number(refundToRenter) || 0);
-  const payoutAmt = Math.max(0, Number(payoutToShop) || 0);
+  const deposit = Number(order.depositAmount) || 0;
+
+  // Hỗ trợ phân bổ theo tỷ lệ % nếu được truyền vào
+  let refundAmt = Math.max(0, Number(refundToRenter) || 0);
+  let payoutAmt = Math.max(0, Number(payoutToShop) || 0);
+
+  if (refundPercent !== undefined && refundPercent !== null) {
+    refundAmt = Math.round((Math.max(0, Math.min(100, Number(refundPercent))) / 100) * deposit);
+  }
+  if (payoutPercent !== undefined && payoutPercent !== null) {
+    payoutAmt = Math.round((Math.max(0, Math.min(100, Number(payoutPercent))) / 100) * deposit);
+  }
 
   // AC: Tổng tiền giải quyết không được vượt quá số tiền cọc đang bị giữ
-  if (refundAmt + payoutAmt > order.depositAmount && order.depositAmount > 0) {
+  if (refundAmt + payoutAmt > deposit && deposit > 0) {
     throw createError(
-      `Tổng tiền hoàn trả (${refundAmt}) và bồi thường (${payoutAmt}) không được vượt quá tiền cọc của đơn (${order.depositAmount})`,
+      `Tổng tiền hoàn trả (${refundAmt}) và bồi thường (${payoutAmt}) không được vượt quá tiền cọc của đơn (${deposit})`,
       400,
       "DISPUTE_AMOUNT_EXCEEDS_DEPOSIT"
     );
@@ -383,23 +401,51 @@ export const resolveDisputeService = async (
   }
 
   order.dispute.status = "RESOLVED";
-  order.dispute.resolution = resolution;
+  order.dispute.resolution = resolution || "Admin phán quyết phân bổ tiền cọc";
   order.dispute.refundToRenter = refundAmt;
   order.dispute.payoutToShop = payoutAmt;
   order.dispute.adminNotes = String(adminNotes || "").trim();
   order.dispute.resolvedAt = new Date();
   order.dispute.resolvedBy = adminUser._id;
 
-  // Cập nhật trạng thái đơn sang COMPLETED
+  // AC: Cập nhật trạng thái đơn sang COMPLETED
   order.status = RENTAL_ORDER_STATUS.COMPLETED;
 
   await order.save();
+
+  // AC: Phán quyết tranh chấp tự động kích hoạt cập nhật trạng thái đơn hàng và ví nội bộ
+  let renterWalletBalance = null;
+  let shopWalletBalance = null;
+
+  if (order.renterId && refundAmt > 0) {
+    const renter = await User.findById(order.renterId);
+    if (renter) {
+      renter.walletBalance = (Number(renter.walletBalance) || 0) + refundAmt;
+      await renter.save();
+      renterWalletBalance = renter.walletBalance;
+    }
+  }
+
+  if (order.shopOwnerId && payoutAmt > 0) {
+    const shopOwner = await User.findById(order.shopOwnerId);
+    if (shopOwner) {
+      shopOwner.walletBalance = (Number(shopOwner.walletBalance) || 0) + payoutAmt;
+      await shopOwner.save();
+      shopWalletBalance = shopOwner.walletBalance;
+    }
+  }
 
   return {
     orderId: order._id,
     orderCode: order.orderCode,
     status: order.status,
     dispute: order.dispute,
+    walletUpdates: {
+      renterRefund: refundAmt,
+      renterWalletBalance,
+      shopPayout: payoutAmt,
+      shopWalletBalance,
+    },
   };
 };
 
@@ -632,5 +678,81 @@ export const getFinancialReportService = async () => {
       },
     },
     ordersBreakdown: rentalStatusCounts,
+  };
+};
+
+// ============================================================================
+// 4. PLATFORM FEE CONFIGURATION (CẤU HÌNH TỶ LỆ % PHÍ SÀN RENT & THRIFT)
+// ============================================================================
+
+/**
+ * Lấy cấu hình tỷ lệ % phí sàn hiện tại
+ */
+export const getPlatformFeeService = async () => {
+  let config = await PlatformConfig.findOne().sort({ updatedAt: -1 }).populate("updatedBy", "fullName email");
+  if (!config) {
+    config = await PlatformConfig.create({
+      rentFeePercent: 10,
+      thriftFeePercent: 8,
+      description: "Cấu hình tỷ lệ % phí sàn mặc định ReUse Hub",
+    });
+  }
+
+  return {
+    rentFeePercent: config.rentFeePercent,
+    thriftFeePercent: config.thriftFeePercent,
+    description: config.description,
+    updatedAt: config.updatedAt,
+    updatedBy: config.updatedBy,
+  };
+};
+
+/**
+ * Cập nhật tỷ lệ % phí sàn RENT và THRIFT
+ */
+export const updatePlatformFeeService = async ({ rentFeePercent, thriftFeePercent, description }, adminUser) => {
+  if (rentFeePercent !== undefined && rentFeePercent !== null) {
+    const num = Number(rentFeePercent);
+    if (isNaN(num) || num < 0 || num > 100) {
+      throw createError("Tỷ lệ % phí sàn RENT phải là số từ 0 đến 100", 400, "INVALID_RENT_FEE_PERCENT");
+    }
+  }
+
+  if (thriftFeePercent !== undefined && thriftFeePercent !== null) {
+    const num = Number(thriftFeePercent);
+    if (isNaN(num) || num < 0 || num > 100) {
+      throw createError("Tỷ lệ % phí sàn THRIFT phải là số từ 0 đến 100", 400, "INVALID_THRIFT_FEE_PERCENT");
+    }
+  }
+
+  let config = await PlatformConfig.findOne().sort({ updatedAt: -1 });
+  if (!config) {
+    config = new PlatformConfig({
+      rentFeePercent: rentFeePercent !== undefined ? Number(rentFeePercent) : 10,
+      thriftFeePercent: thriftFeePercent !== undefined ? Number(thriftFeePercent) : 8,
+      description: description || "Cấu hình tỷ lệ % phí sàn ReUse Hub",
+      updatedBy: adminUser?._id,
+    });
+  } else {
+    if (rentFeePercent !== undefined && rentFeePercent !== null) {
+      config.rentFeePercent = Number(rentFeePercent);
+    }
+    if (thriftFeePercent !== undefined && thriftFeePercent !== null) {
+      config.thriftFeePercent = Number(thriftFeePercent);
+    }
+    if (description) {
+      config.description = String(description).trim();
+    }
+    config.updatedBy = adminUser?._id;
+  }
+
+  await config.save();
+
+  return {
+    rentFeePercent: config.rentFeePercent,
+    thriftFeePercent: config.thriftFeePercent,
+    description: config.description,
+    updatedAt: config.updatedAt,
+    updatedBy: adminUser ? { _id: adminUser._id, fullName: adminUser.fullName, email: adminUser.email } : null,
   };
 };
