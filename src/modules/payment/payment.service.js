@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
+import RentalProduct from "../rent/product/product.model.js";
 import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
 import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
@@ -108,21 +109,51 @@ const createVnPayPaymentUrl = async ({
 
     const now = new Date();
     const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const dummyProductId = new mongoose.Types.ObjectId();
+        let resolvedProduct = null;
+    if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+      resolvedProduct = await RentalProduct.findById(productId);
+    }
+    if (!resolvedProduct && Array.isArray(items) && items.length > 0 && items[0]?.productId && mongoose.Types.ObjectId.isValid(items[0].productId)) {
+      resolvedProduct = await RentalProduct.findById(items[0].productId);
+    }
+
+    const orderItems = resolvedProduct
+      ? [
+          {
+            productId: resolvedProduct._id,
+            productName: resolvedProduct.name,
+            quantity: 1,
+            pricePerDay: resolvedProduct.pricePerDay || payAmount,
+            depositAmount: resolvedProduct.depositAmount || 0,
+            imageUrl: resolvedProduct.images?.[0] || "",
+          },
+        ]
+      : Array.isArray(items) && items.length > 0
+      ? items.map((it) => ({
+          productId: it.productId && mongoose.Types.ObjectId.isValid(it.productId) ? it.productId : new mongoose.Types.ObjectId(),
+          productName: it.productName || it.title || `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
+          quantity: Number(it.quantity) || 1,
+          pricePerDay: Number(it.pricePerDay || it.price) || payAmount,
+          depositAmount: Number(it.depositAmount || it.deposit) || 0,
+          imageUrl: it.imageUrl || it.image || "",
+        }))
+      : [
+          {
+            productId: new mongoose.Types.ObjectId(),
+            productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
+            quantity: 1,
+            pricePerDay: payAmount,
+            depositAmount: 0,
+          },
+        ];
+
+    const actualShopOwnerId = (resolvedProduct && resolvedProduct.ownerId) || shopOwner._id;
 
     order = await RentalOrder.create({
       orderCode: code,
       renterId: user._id,
-      shopOwnerId: shopOwner._id,
-      items: [
-        {
-          productId: dummyProductId,
-          productName: `Đơn hàng ${type === "THRIFT" ? "Thrift" : "Thuê"} (${code})`,
-          quantity: 1,
-          pricePerDay: payAmount,
-          depositAmount: 0,
-        },
-      ],
+      shopOwnerId: actualShopOwnerId,
+      items: orderItems,
       startDate: now,
       endDate: nextDay,
       rentalFee: payAmount,
