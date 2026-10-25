@@ -30,6 +30,7 @@ const createVnPayUrlController = async (req, res, next) => {
       ipAddress,
       returnUrl: req.body.returnUrl,
       bankCode: req.body.bankCode,
+      productId: req.body.productId,
       items: req.body.items,
       shippingAddress: req.body.shippingAddress,
       startDate: req.body.startDate,
