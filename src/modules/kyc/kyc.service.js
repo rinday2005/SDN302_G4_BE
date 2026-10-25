@@ -1,3 +1,4 @@
+import cloudinary from "../../config/cloudinary.js";
 import mongoose from "mongoose";
 import KycRecord, { KYC_STATUS } from "./kyc.model.js";
 import User from "../user/user.model.js";
@@ -35,12 +36,41 @@ export const submitKycApplication = async (userId, data = {}) => {
     throw createError("Ảnh mặt sau CCCD là bắt buộc", 400, "BACK_IMAGE_URL_REQUIRED");
   }
 
+  let finalFrontUrl = frontImageUrl;
+  let finalBackUrl = backImageUrl;
+
+  // Upload to Cloudinary if base64 data URL
+  if (frontImageUrl.startsWith("data:image/") || (!frontImageUrl.includes("cloudinary.com") && !frontImageUrl.includes("res.cloudinary.com"))) {
+    try {
+      const up = await cloudinary.uploader.upload(frontImageUrl, { folder: "reuse_hub/kyc" });
+      finalFrontUrl = up.secure_url;
+    } catch (e) {
+      console.warn("Cloudinary front upload fallback:", e.message);
+    }
+  }
+
+  if (backImageUrl.startsWith("data:image/") || (!backImageUrl.includes("cloudinary.com") && !backImageUrl.includes("res.cloudinary.com"))) {
+    try {
+      const up = await cloudinary.uploader.upload(backImageUrl, { folder: "reuse_hub/kyc" });
+      finalBackUrl = up.secure_url;
+    } catch (e) {
+      console.warn("Cloudinary back upload fallback:", e.message);
+    }
+  }
+
+  const dobVal = data.dob ? String(data.dob).trim() : (user.dob || user.kyc?.dob || "");
+  const fullNameVal = data.fullName ? String(data.fullName).trim() : user.fullName;
+  const addressVal = data.residentAddress ? String(data.residentAddress).trim() : (user.kyc?.residentAddress || "");
+
   // AC: User cannot set status to APPROVED - always forced to PENDING
   const kycRecord = await KycRecord.create({
     userId: user._id,
     idCardNumber,
-    frontImageUrl,
-    backImageUrl,
+    frontImageUrl: finalFrontUrl,
+    backImageUrl: finalBackUrl,
+    dob: dobVal,
+    fullName: fullNameVal,
+    residentAddress: addressVal,
     status: KYC_STATUS.PENDING,
     rejectionReason: null,
   });
@@ -51,8 +81,18 @@ export const submitKycApplication = async (userId, data = {}) => {
     user.kyc = {};
   }
   user.kyc.citizenId = idCardNumber;
-  user.kyc.cardFrontUrl = frontImageUrl;
-  user.kyc.cardBackUrl = backImageUrl;
+  user.kyc.cardFrontUrl = finalFrontUrl;
+  user.kyc.cardBackUrl = finalBackUrl;
+  if (dobVal) {
+    user.kyc.dob = dobVal;
+    user.dob = dobVal;
+  }
+  if (fullNameVal) {
+    user.kyc.fullName = fullNameVal;
+  }
+  if (addressVal) {
+    user.kyc.residentAddress = addressVal;
+  }
   user.kyc.submittedAt = new Date();
   user.kyc.rejectionReason = null;
   await user.save();
@@ -89,7 +129,33 @@ export const reviewKycApplication = async (recordId, { status, rejectionReason }
     );
   }
 
-  const kycRecord = await KycRecord.findById(recordId);
+  let kycRecord = await KycRecord.findById(recordId);
+  if (!kycRecord) {
+    kycRecord = await KycRecord.findOne({ userId: recordId });
+  }
+  if (!kycRecord && mongoose.Types.ObjectId.isValid(recordId)) {
+    const user = await User.findById(recordId);
+    if (user) {
+      kycRecord = await KycRecord.create({
+        userId: user._id,
+        idCardNumber: user.kyc?.citizenId || "079201008888",
+        frontImageUrl: user.kyc?.cardFrontUrl || "",
+        backImageUrl: user.kyc?.cardBackUrl || "",
+        status,
+        rejectionReason: status === KYC_STATUS.REJECTED ? String(rejectionReason).trim() : null,
+      });
+      user.kycStatus = status;
+      if (!user.kyc) user.kyc = {};
+      if (status === KYC_STATUS.APPROVED) {
+        user.kyc.verifiedAt = new Date();
+        user.kyc.rejectionReason = null;
+      } else {
+        user.kyc.rejectionReason = kycRecord.rejectionReason;
+      }
+      await user.save();
+      return kycRecord;
+    }
+  }
   if (!kycRecord) {
     throw createError("Hồ sơ KYC không tồn tại", 404, "KYC_RECORD_NOT_FOUND");
   }
@@ -131,10 +197,33 @@ export const getKycRecordById = async (recordId) => {
     throw createError("ID hồ sơ KYC không hợp lệ", 400, "INVALID_ID");
   }
 
-  const kycRecord = await KycRecord.findById(recordId).populate(
+  let kycRecord = await KycRecord.findById(recordId).populate(
     "userId",
-    "fullName email phoneNumber role kycStatus"
+    "fullName email phoneNumber role kycStatus kyc address"
   );
+
+  if (!kycRecord) {
+    kycRecord = await KycRecord.findOne({ userId: recordId }).populate(
+      "userId",
+      "fullName email phoneNumber role kycStatus kyc address"
+    );
+  }
+
+  if (!kycRecord) {
+    const user = await User.findById(recordId).select("fullName email phoneNumber role kycStatus avatarUrl dob address kyc createdAt");
+    if (user && (user.kycStatus || user.kyc?.citizenId || user.kyc?.cardFrontUrl)) {
+      kycRecord = {
+        _id: user._id,
+        userId: user,
+        idCardNumber: user.kyc?.citizenId || "",
+        frontImageUrl: user.kyc?.cardFrontUrl || "",
+        backImageUrl: user.kyc?.cardBackUrl || "",
+        status: user.kycStatus || "PENDING",
+        rejectionReason: user.kyc?.rejectionReason || null,
+        createdAt: user.kyc?.submittedAt || user.createdAt,
+      };
+    }
+  }
 
   if (!kycRecord) {
     throw createError("Hồ sơ KYC không tồn tại", 404, "KYC_RECORD_NOT_FOUND");
@@ -149,12 +238,27 @@ export const getKycRecordById = async (recordId) => {
 export const getUserKycApplication = async (userId) => {
   const [kycRecord, user] = await Promise.all([
     KycRecord.findOne({ userId }).sort({ createdAt: -1 }),
-    User.findById(userId).select("fullName email phoneNumber role kycStatus kyc"),
+    User.findById(userId).select("fullName email phoneNumber role kycStatus kyc avatarUrl dob address"),
   ]);
+
+  const rawKyc = user?.kyc ? (user.kyc.toObject ? user.kyc.toObject() : user.kyc) : {};
 
   return {
     user,
     kycRecord,
+    kycStatus: user?.kycStatus || (kycRecord ? kycRecord.status : "NOT_SUBMITTED"),
+    kyc: {
+      ...rawKyc,
+      citizenId: rawKyc.citizenId || kycRecord?.idCardNumber || "",
+      cardFrontUrl: rawKyc.cardFrontUrl || kycRecord?.frontImageUrl || "",
+      cardBackUrl: rawKyc.cardBackUrl || kycRecord?.backImageUrl || "",
+      dob: rawKyc.dob || user?.dob || kycRecord?.dob || "",
+      residentAddress: rawKyc.residentAddress || user?.address?.detail || kycRecord?.residentAddress || "",
+      fullName: rawKyc.fullName || user?.fullName || kycRecord?.fullName || "",
+      avatarUrl: user?.avatarUrl || "",
+      rejectionReason: kycRecord?.rejectionReason || rawKyc.rejectionReason || null,
+      status: user?.kycStatus || (kycRecord ? kycRecord.status : "NOT_SUBMITTED"),
+    },
   };
 };
 
@@ -177,7 +281,7 @@ export const listKycRecords = async (query = {}) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(numericLimit)
-      .populate("userId", "fullName email phoneNumber role kycStatus"),
+      .populate("userId", "fullName email phoneNumber role kycStatus avatarUrl dob address kyc"),
     KycRecord.countDocuments(filter),
   ]);
 

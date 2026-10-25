@@ -134,3 +134,16 @@ export const updateKycStatusController = async (req, res, next) => {
     next(error);
   }
 };
+
+
+/**
+ * GET /api/users
+ */
+export const getAllUsersController = async (req, res, next) => {
+  try {
+    const users = await getAllUsers(req.query);
+    return successResponse(res, "Lấy danh sách người dùng thành công", users);
+  } catch (error) {
+    next(error);
+  }
+};

@@ -7,6 +7,8 @@ import {
   getDisputeByIdService,
   resolveDisputeService,
   getFinancialReportService,
+  getPlatformFeeService,
+  updatePlatformFeeService,
 } from "./admin.service.js";
 
 /**
@@ -128,6 +130,32 @@ export const getFinanceOverviewController = async (req, res, next) => {
   try {
     const result = await getFinancialReportService();
     return successResponse(res, "Lấy báo cáo tài chính thành công", result, 200);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/admin/platform-fee hoặc /api/admin/fees
+ * Lấy cấu hình tỷ lệ % phí sàn cho RENT và THRIFT
+ */
+export const getPlatformFeeController = async (req, res, next) => {
+  try {
+    const result = await getPlatformFeeService();
+    return successResponse(res, "Lấy cấu hình tỷ lệ phí sàn thành công", result, 200);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/admin/platform-fee hoặc /api/admin/fees
+ * Cập nhật tỷ lệ % phí sàn cho RENT và THRIFT
+ */
+export const updatePlatformFeeController = async (req, res, next) => {
+  try {
+    const result = await updatePlatformFeeService(req.body, req.user);
+    return successResponse(res, "Cập nhật tỷ lệ phí sàn thành công", result, 200);
   } catch (error) {
     next(error);
   }

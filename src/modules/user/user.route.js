@@ -2,6 +2,7 @@ import { Router } from "express";
 import authMiddleware, { optionalAuthMiddleware } from "../../middleware/auth.middleware.js";
 import upload from "../../middleware/upload.middleware.js";
 import {
+  getAllUsersController,
   getProfileController,
   updateProfileController,
   uploadAvatarController,
@@ -11,6 +12,9 @@ import {
 } from "./user.controller.js";
 
 const router = Router();
+
+// GET all users (Admin/Authenticated)
+router.get("/", authMiddleware, getAllUsersController);
 
 // GET current user profile
 router.get("/profile", authMiddleware, getProfileController);

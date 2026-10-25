@@ -45,6 +45,11 @@ const createVnPayPaymentUrl = async ({
   let code = orderCode || `RH_${Date.now().toString().slice(-6)}`;
   let isThrift = type === "THRIFT";
 
+  // Check KYC status for RENT payments
+  if (!isThrift && user && user.kycStatus !== "APPROVED") {
+    throw createError("Tài khoản cần được duyệt KYC trước khi tạo giao dịch thuê", 403, "KYC_NOT_APPROVED");
+  }
+
   // 1. Nếu có orderId hợp lệ, thử tìm trong RentalOrder hoặc ThriftOrder
   if (orderId && typeof orderId === "string" && mongoose.Types.ObjectId.isValid(orderId)) {
     if (isThrift) {
