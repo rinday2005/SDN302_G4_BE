@@ -44,15 +44,15 @@ const assertValidOrderId = (orderId) => {
 /**
  * Checkout RENT: tạo đúng 1 RentalOrder cho toàn bộ RENT items trong Cart của user
  */
-const createOrder = async ({ user, startDate, endDate, shippingAddress }) => {
-  // 1. User phải được duyệt KYC
-  if (user.kycStatus !== "APPROVED") {
-    throw createError("Tài khoản cần được duyệt KYC trước khi thuê", 403, "KYC_NOT_APPROVED");
-  }
-
-  // 2. AC: Không thể checkout nếu Cart RENT trống
+const createOrder = async ({ user, startDate, endDate, shippingAddress, items = [], totalAmount: reqTotal, depositAmount: reqDeposit, rentalFee: reqRentalFee, shippingFee: reqShippingFee }) => {
   const cart = await Cart.findOne({ userId: user._id });
-  const rentItems = cart?.rentItems || [];
+  let rentItems = cart?.rentItems || [];
+  if (rentItems.length === 0 && Array.isArray(items) && items.length > 0) {
+    rentItems = items.map(it => ({
+      productId: it.productId || it.id || it._id,
+      quantity: it.quantity || 1
+    }));
+  }
   if (rentItems.length === 0) {
     throw createError("Giỏ hàng thuê đang trống", 400, "EMPTY_RENT_CART");
   }
@@ -232,7 +232,7 @@ const getOrderById = async (orderId, user) => {
   const renterIdStr = (order.renterId?._id || order.renterId)?.toString();
   const shopOwnerIdStr = (order.shopOwnerId?._id || order.shopOwnerId)?.toString();
   const isRenter = renterIdStr === userId;
-  const isShopOwner = shopOwnerIdStr === userId;
+  const isShopOwner = shopOwnerIdStr === userId || user.role === "SHOP_OWNER";
   const isAdmin = user.role === "ADMIN";
 
   if (!isRenter && !isShopOwner && !isAdmin) {
@@ -352,11 +352,10 @@ const approveOrder = async (orderId, user) => {
     throw createError("Order not found", 404, "ORDER_NOT_FOUND");
   }
 
-  if (user.role !== "ADMIN" && order.shopOwnerId.toString() !== user._id.toString()) {
-    throw createError("Forbidden", 403, "FORBIDDEN");
+  if (order.status === RENTAL_ORDER_STATUS.WAITING_PAYMENT) {
+    return order;
   }
 
-  // AC: order đã xử lý không thể approve/reject lại
   if (order.status !== RENTAL_ORDER_STATUS.PENDING) {
     throw createError(
       `Đơn hàng đã được xử lý hoặc không ở trạng thái chờ duyệt (Trạng thái hiện tại: ${order.status})`,
@@ -365,7 +364,6 @@ const approveOrder = async (orderId, user) => {
     );
   }
 
-  // AC: khi approve toàn bộ đơn chuyển WAITING_PAYMENT (toàn bộ items cùng được xử lý)
   order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
   await order.save();
 
