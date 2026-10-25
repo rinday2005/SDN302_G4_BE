@@ -6,6 +6,7 @@ import Category from "../src/modules/category/category.model.js";
 import User from "../src/modules/user/user.model.js";
 import Product from "../src/modules/rent/product/product.model.js";
 import Cart from "../src/modules/cart/cart.model.js";
+import KycRecord, { KYC_STATUS } from "../src/modules/kyc/kyc.model.js";
 
 const seedCategories = async () => {
   const categories = [
@@ -142,6 +143,59 @@ const seedUsers = async () => {
     );
   }
   console.log(`Matched and initialized carts for all ${allUsers.length} users`);
+};
+
+
+const seedKyc = async () => {
+  const defaultPassword = "Password123!";
+  const passwordHash = await bcrypt.hash(defaultPassword, 10);
+
+  // User nộp hồ sơ KYC: hon@gmail.com
+  const honUser = await User.findOneAndUpdate(
+    { email: "hon@gmail.com" },
+    {
+      email: "hon@gmail.com",
+      passwordHash,
+      fullName: "Nguyễn Hơn",
+      phoneNumber: "0987364578",
+      role: "USER",
+      kycStatus: "PENDING",
+      avatarUrl: "https://res.cloudinary.com/qs6kyqau/image/upload/v1792854543/reuse_hub/avatars/zsk3hx9obqvp0b5opilb.png",
+      address: {
+        province: "Thành phố Đà Nẵng",
+        district: "Quận Hải Châu",
+        ward: "Phường Hải Châu 1",
+        detail: "48 Bạch Đằng",
+      },
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true,
+    }
+  );
+
+  await KycRecord.findOneAndUpdate(
+    { userId: honUser._id },
+    {
+      userId: honUser._id,
+      idCardNumber: "09873645782635",
+      frontImageUrl: "https://res.cloudinary.com/qs6kyqau/image/upload/v1792864768/reuse_hub/kyc/lneerajhziqixnsom0h2.jpg",
+      backImageUrl: "https://res.cloudinary.com/qs6kyqau/image/upload/v1792864769/reuse_hub/kyc/ollsyldqpnitwoxy2fxz.jpg",
+      dob: "24/09/2005",
+      fullName: "Nguyễn Hơn",
+      residentAddress: "48 Bạch Đằng, Phường Hải Châu 1, Quận Hải Châu, Thành phố Đà Nẵng",
+      status: KYC_STATUS.PENDING,
+      rejectionReason: null,
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true,
+    }
+  );
+
+  console.log("Sample pending KYC record for hon@gmail.com seeded successfully");
 };
 
 const seedProducts = async (categories) => {
@@ -356,6 +410,7 @@ const runSeed = async () => {
 
     const categories = await seedCategories();
     await seedUsers();
+    await seedKyc();
     await seedProducts(categories);
 
     console.log("Master seed completed successfully");

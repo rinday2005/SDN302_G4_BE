@@ -6,6 +6,7 @@ import {
   getKycStatus,
   submitKyc,
   updateKycStatus,
+  getAllUsers,
 } from "./user.service.js";
 import { uploadImageToCloudinary } from "../../utils/cloudinaryUpload.js";
 
