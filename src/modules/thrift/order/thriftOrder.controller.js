@@ -97,7 +97,7 @@ export const updateThriftOrderStatus = async (req, res, next) => {
     const updatedOrder = await thriftOrderService.updateThriftOrderStatus(
       id,
       req.user,
-      req.body?.status
+      req.body
     );
     return successResponse(
       res,
@@ -105,6 +105,16 @@ export const updateThriftOrderStatus = async (req, res, next) => {
       updatedOrder,
       200
     );
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const confirmDeliveredThriftOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const order = await thriftOrderService.confirmDeliveredThriftOrder(id, req.user);
+    return successResponse(res, "Xác nhận nhận hàng thành công", order, 200);
   } catch (error) {
     next(error);
   }
