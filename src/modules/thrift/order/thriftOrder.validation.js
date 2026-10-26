@@ -55,12 +55,12 @@ export const validateCheckoutThriftOrder = (req, res, next) => {
 
 export const validateUpdateThriftOrderStatus = (req, res, next) => {
   const { status } = req.body;
-  const validStatuses = Object.values(THRIFT_ORDER_STATUS);
+  const validStatuses = [...Object.values(THRIFT_ORDER_STATUS), "SHIPPED", "PROCESSING", "ATELIER_APPRAISAL"];
 
-  if (!status || !validStatuses.includes(status)) {
+  if (status && !validStatuses.includes(status)) {
     return fail(
       next,
-      `Trạng thái đơn hàng phải là một trong: ${validStatuses.join(", ")}`,
+      `Trạng thái đơn hàng không hợp lệ: ${status}`,
       "INVALID_ORDER_STATUS"
     );
   }

@@ -9,6 +9,7 @@ import {
   getThriftOrderById,
   cancelThriftOrder,
   updateThriftOrderStatus,
+  confirmDeliveredThriftOrder,
 } from "./thriftOrder.controller.js";
 import {
   validateCheckoutThriftOrder,
@@ -29,6 +30,8 @@ router.get("/my-orders", getMyThriftOrders);
 
 // Xem danh sách đơn của người bán (Shop Owner)
 router.get("/seller-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
+router.get("/shop", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
+router.get("/shop-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
 
 // Xem chi tiết đơn hàng (Chặn IDOR)
 router.get("/:id", getThriftOrderById);
@@ -37,6 +40,9 @@ router.get("/:id", getThriftOrderById);
 router.post("/:id/pay", lockAndMarkOrderPaid);
 
 // Hủy đơn hàng
+// Khách xác nhận đã nhận hàng (Buyer confirms delivery)
+router.post("/:id/confirm-delivered", confirmDeliveredThriftOrder);
+
 router.post("/:id/cancel", cancelThriftOrder);
 
 // Cập nhật trạng thái xử lý/vận chuyển đơn hàng (Shop Owner / Admin)

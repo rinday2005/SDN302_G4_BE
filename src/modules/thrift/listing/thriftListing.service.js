@@ -41,11 +41,19 @@ export const updateListing = async (listingId, userId, updateData) => {
 
 // 3. Lấy danh sách listing public cho khách xem
 export const getPublicListings = async (query = {}) => {
-  // AC: Listing public CHỈ CÓ THỂ LÀ APPROVED
-  const filter = {
-    ...query,
-    status: "APPROVED",
-  };
+  const filter = { ...query };
+  delete filter.includeSold;
+
+  if (query.status) {
+    if (query.status === "ALL" || query.status === "all") {
+      delete filter.status;
+    } else if (typeof query.status === "string" && query.status.includes(",")) {
+      filter.status = { $in: query.status.split(",") };
+    }
+  } else {
+    // Luôn giữ các sản phẩm đã bán/đã mua (SOLD) hiển thị trên Thrift Marketplace
+    filter.status = { $in: ["APPROVED", "SOLD"] };
+  }
   return await ThriftListing.find(filter).populate("categoryId", "name").lean();
 };
 

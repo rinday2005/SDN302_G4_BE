@@ -15,7 +15,8 @@ export const THRIFT_ORDER_STATUS = Object.freeze({
   SHIPPING: "SHIPPING", // Đang giao hàng tới người mua
   DELIVERED: "DELIVERED", // Hàng đã được giao tới địa chỉ
   COMPLETED: "COMPLETED", // Hoàn tất đơn hàng
-  CANCELLED: "CANCELLED", // Đơn bị hủy
+  CANCELLED: "CANCELLED",
+  DISPUTED: "DISPUTED", // Đơn bị hủy
 });
 
 // Snapshot sản phẩm thanh lý tại thời điểm đặt mua
@@ -198,6 +199,43 @@ const thriftOrderSchema = new mongoose.Schema(
       default: "",
     },
     cancelledAt: {
+      type: Date,
+      default: null,
+    },
+    trackingCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    courierName: {
+      type: String,
+      trim: true,
+      default: "Viettel Post Chuyên Dụng Nanuk",
+    },
+    sealCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    provenanceVaultCertId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    escrowStatus: {
+      type: String,
+      enum: ["PENDING", "HELD_72H", "RELEASED", "REFUNDED"],
+      default: "HELD_72H",
+    },
+    escrowExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    buyerConfirmed: {
+      type: Boolean,
+      default: false,
+    },
+    buyerConfirmedAt: {
       type: Date,
       default: null,
     },
