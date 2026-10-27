@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 import RentalProduct from "./product.model.js";
 import RentalOrder from "../order/order.model.js";
 
@@ -374,7 +374,7 @@ const getPublicProductDetail = async (productId) => {
       if (
         item.productId &&
         item.productId.toString() ===
-          product._id.toString()
+        product._id.toString()
       ) {
         bookedQuantity += Number(
           item.quantity || 0
@@ -417,7 +417,7 @@ const getPublicProductDetail = async (productId) => {
     eventMap.set(
       event.time,
       (eventMap.get(event.time) || 0) +
-        event.delta
+      event.delta
     );
   }
 
@@ -469,7 +469,7 @@ const getPublicProductDetail = async (productId) => {
       Math.max(
         0,
         product.totalQuantity -
-          currentBookedQuantity
+        currentBookedQuantity
       );
 
     if (
@@ -496,7 +496,7 @@ const getPublicProductDetail = async (productId) => {
   for (const period of busyCalendar) {
     const previous =
       mergedBusyCalendar[
-        mergedBusyCalendar.length - 1
+      mergedBusyCalendar.length - 1
       ];
 
     const isContinuous =
@@ -504,20 +504,20 @@ const getPublicProductDetail = async (productId) => {
       new Date(
         previous.endDate
       ).getTime() +
-        1 ===
-        new Date(
-          period.startDate
-        ).getTime();
+      1 ===
+      new Date(
+        period.startDate
+      ).getTime();
 
     const sameBookedQuantity =
       previous &&
       previous.bookedQuantity ===
-        period.bookedQuantity;
+      period.bookedQuantity;
 
     const sameAvailableQuantity =
       previous &&
       previous.availableQuantity ===
-        period.availableQuantity;
+      period.availableQuantity;
 
     if (
       isContinuous &&

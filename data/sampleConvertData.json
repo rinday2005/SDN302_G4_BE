@@ -1,0 +1,50 @@
+{
+  "description": "Data mẫu dùng để test chức năng chuyển đổi sản phẩm RENT sang THRIFT [BE-S4-04]",
+  "note": "Team sẽ cập nhật / upload data thật của nhóm vào folder này sau",
+  "sampleRentalProducts": [
+    {
+      "id": "6724a4444444444444444444",
+      "name": "Máy ảnh Sony A7 Mark III",
+      "categorySlug": "camera",
+      "pricePerDay": 250000,
+      "depositAmount": 5000000,
+      "condition": "LIKE_NEW",
+      "images": [
+        "https://res.cloudinary.com/reusehub/image/upload/sample_sony_1.jpg",
+        "https://res.cloudinary.com/reusehub/image/upload/sample_sony_2.jpg"
+      ],
+      "location": "Hồ Chí Minh",
+      "status": "APPROVED"
+    },
+    {
+      "id": "6724a6666666666666666666",
+      "name": "Váy dạ hội cao cấp Silk Dress",
+      "categorySlug": "dam-du-tiec",
+      "pricePerDay": 120000,
+      "depositAmount": 800000,
+      "condition": "GOOD",
+      "images": [
+        "https://res.cloudinary.com/reusehub/image/upload/sample_dress_1.jpg"
+      ],
+      "location": "Hà Nội",
+      "status": "APPROVED"
+    }
+  ],
+  "sampleConvertApiRequests": [
+    {
+      "case": "Convert đầy đủ thông tin kèm ảnh thực tế",
+      "rentalProductId": "6724a4444444444444444444",
+      "sellingPrice": 15000000,
+      "conditionDescription": "Máy đã qua 5 lần thuê, cảm biến sạch sẽ hoạt động hoàn hảo 99%",
+      "images": [
+        "https://res.cloudinary.com/reusehub/image/upload/sample_thrift_actual.jpg"
+      ]
+    },
+    {
+      "case": "Convert tái sử dụng ảnh từ sản phẩm thuê gốc",
+      "rentalProductId": "6724a6666666666666666666",
+      "sellingPrice": 800000,
+      "conditionDescription": "Váy còn mới 95%, đã giặt sấy khử khuẩn"
+    }
+  ]
+}
