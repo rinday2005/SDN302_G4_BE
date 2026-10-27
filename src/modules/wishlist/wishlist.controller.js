@@ -8,8 +8,13 @@ import {
 import { successResponse } from "../../utils/response.js";
 
 /**
+ * [BE-S6-01] Wishlist Controller
+ */
+
+/**
  * Lấy danh sách yêu thích của người dùng
  * GET /api/wishlist
+ * AC: Chỉ User hiện tại được xem wishlist của mình, populate đúng dữ liệu item.
  */
 export const getWishlistController = async (req, res, next) => {
   try {
@@ -31,8 +36,9 @@ export const getWishlistController = async (req, res, next) => {
  */
 export const addToWishlistController = async (req, res, next) => {
   try {
-    const { productId, productType } = req.body;
-    const result = await addToWishlist(req.user._id, { productId, productType });
+    const itemId = req.body.itemId || req.body.productId;
+    const itemType = req.body.itemType || req.body.productType || "RENT";
+    const result = await addToWishlist(req.user._id, { itemId, itemType, productId: itemId, productType: itemType });
 
     return successResponse(
       res,
@@ -48,11 +54,13 @@ export const addToWishlistController = async (req, res, next) => {
 /**
  * Toggle trạng thái yêu thích (Bấm lần 1: Thêm, Bấm lần 2: Xóa)
  * POST /api/wishlist/toggle
+ * AC: Toggle lần 1 thêm, lần 2 xóa; không tạo duplicate; populate đúng dữ liệu item.
  */
 export const toggleWishlistController = async (req, res, next) => {
   try {
-    const { productId, productType } = req.body;
-    const result = await toggleWishlist(req.user._id, { productId, productType });
+    const itemId = req.body.itemId || req.body.productId;
+    const itemType = req.body.itemType || req.body.productType || "RENT";
+    const result = await toggleWishlist(req.user._id, { itemId, itemType, productId: itemId, productType: itemType });
 
     return successResponse(
       res,
@@ -72,7 +80,8 @@ export const toggleWishlistController = async (req, res, next) => {
  */
 export const removeFromWishlistController = async (req, res, next) => {
   try {
-    const result = await removeFromWishlist(req.user._id, req.params.productId);
+    const productId = req.params.productId || req.params.itemId;
+    const result = await removeFromWishlist(req.user._id, productId);
 
     return successResponse(
       res,

@@ -45,6 +45,10 @@ import reviewRoutes from "../modules/review/review.route.js";
 // Chat APIs and Socket.IO schemas
 import chatRoutes from "../modules/chat/chat.route.js";
 
+// NOTE [An - BE-S6-02]:
+// In-app Notification APIs
+import notificationRoutes from "../modules/notification/notification.route.js";
+
 const router = Router();
 
 // ======================================================
@@ -239,5 +243,12 @@ router.use("/api/admin", adminRouter);
 // ======================================================
 // NOTE [An - BE-S5-01]: Chat with unique Shop Owner
 router.use("/api/chat", chatRoutes);
+
+// ======================================================
+// NOTIFICATIONS
+// ======================================================
+// NOTE [An - BE-S6-02]: In-app Notification APIs
+router.use("/api/notifications", notificationRoutes);
+router.use("/api/notification", notificationRoutes);
 
 export default router;
