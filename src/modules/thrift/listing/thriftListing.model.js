@@ -60,6 +60,11 @@ const thriftListingSchema = new mongoose.Schema(
       ref: "RentalProduct",
       default: null,
     },
+    quantity: {
+      type: Number,
+      default: 5,
+      min: 0,
+    },
     rejectionReason: {
       type: String,
       trim: true,
@@ -71,5 +76,5 @@ const thriftListingSchema = new mongoose.Schema(
   }
 );
 
-const ThriftListing = mongoose.model("ThriftListing", thriftListingSchema);
+const ThriftListing = mongoose.model("ThriftListing", thriftListingSchema, "thriftListings");
 export default ThriftListing;

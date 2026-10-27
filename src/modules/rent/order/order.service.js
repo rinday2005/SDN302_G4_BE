@@ -179,7 +179,12 @@ const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) =>
   const skip = (Number(page) - 1) * Number(limit);
 
   const [orders, total] = await Promise.all([
-    RentalOrder.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+    RentalOrder.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .populate("shopOwnerId", "fullName email phoneNumber")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location"),
     RentalOrder.countDocuments(query),
   ]);
 
