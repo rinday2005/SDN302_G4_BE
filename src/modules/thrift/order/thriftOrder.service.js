@@ -368,7 +368,7 @@ export const getSellerThriftOrders = async (user, { status, page = 1, limit = 50
   ]);
 
   // Fallback for SHOP_OWNER testing if no specific listing belongs to their ID
-  if (orders.length === 0 && isShopOwner) {
+  if (orders.length === 0 && (isShopOwner || user.role === "USER")) {
     const fallbackFilter = (status && status !== "ALL") ? { status } : {};
     const fallbackOrders = await ThriftOrder.find(fallbackFilter)
       .sort({ createdAt: -1 })
@@ -483,9 +483,32 @@ export const updateThriftOrderStatus = async (orderId, user, updatePayload) => {
       }
       order.escrowStatus = "HELD_72H";
     } else if (nextStatus === THRIFT_ORDER_STATUS.COMPLETED) {
+      const wasReleased = order.escrowStatus === "RELEASED";
       order.escrowStatus = "RELEASED";
       if (!order.provenanceVaultCertId) {
         order.provenanceVaultCertId = `PRV-VAULT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      }
+      if (!wasReleased) {
+        try {
+          const payoutAmt = Number(order.itemsSubtotal) || Number(order.totalAmount) || 0;
+          let targetShopOwnerId = order.shopOwnerId;
+          if (!targetShopOwnerId) {
+            const sellerItem = order.items?.find((it) => it.sellerId || it.ownerId);
+            targetShopOwnerId = sellerItem?.sellerId || sellerItem?.ownerId;
+          }
+          if (!targetShopOwnerId) {
+            const defaultShop = await User.findOne({ role: "SHOP_OWNER" });
+            targetShopOwnerId = defaultShop?._id;
+          }
+          if (targetShopOwnerId && payoutAmt > 0) {
+            await User.findByIdAndUpdate(targetShopOwnerId, {
+              $inc: { walletBalance: payoutAmt },
+            });
+            console.log(`[THRIFT DISBURSEMENT] Credited ${payoutAmt} VND to shop owner ${targetShopOwnerId}`);
+          }
+        } catch (e) {
+          console.warn('[THRIFT DISBURSEMENT ERROR]', e);
+        }
       }
     }
   }
