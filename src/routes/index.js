@@ -41,6 +41,10 @@ import adminRouter from "../modules/admin/admin.route.js";
 // Review APIs for completed RENT orders.
 import reviewRoutes from "../modules/review/review.route.js";
 
+// NOTE [An - BE-S5-01]:
+// Chat APIs and Socket.IO schemas
+import chatRoutes from "../modules/chat/chat.route.js";
+
 const router = Router();
 
 // ======================================================
@@ -229,5 +233,11 @@ router.use("/api/admin/kyc", adminKycRouter);
 // ADMIN: LISTING MODERATION, DISPUTES, FINANCE REPORTING
 // ======================================================
 router.use("/api/admin", adminRouter);
+
+// ======================================================
+// CHAT & MESSAGES
+// ======================================================
+// NOTE [An - BE-S5-01]: Chat with unique Shop Owner
+router.use("/api/chat", chatRoutes);
 
 export default router;
