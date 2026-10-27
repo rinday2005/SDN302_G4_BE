@@ -7,6 +7,8 @@ import { checkRentalAvailability } from "../availability/availability.service.js
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
 import RentalReturn from "../return/return.model.js";
+import { sendSystemNotificationSafe } from "../../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
 const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -372,6 +374,16 @@ const approveOrder = async (orderId, user) => {
   order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
   await order.save();
 
+  // [BE-S6-02] Bắn thông báo Shop duyệt đơn
+  sendSystemNotificationSafe({
+    userId: order.renterId || order.userId,
+    title: "Đơn thuê được phê duyệt",
+    message: `Đơn thuê ${order.orderCode} đã được chủ shop phê duyệt. Vui lòng thanh toán cọc và tiền thuê.`,
+    type: NOTIFICATION_TYPE.RENTAL_ORDER,
+    link: `/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   return order;
 };
 
@@ -408,6 +420,16 @@ const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
     order.rejectionReason = reason.trim();
   }
   await order.save();
+
+  // [BE-S6-02] Bắn thông báo Shop từ chối đơn
+  sendSystemNotificationSafe({
+    userId: order.renterId || order.userId,
+    title: "Đơn thuê bị từ chối",
+    message: `Đơn thuê ${order.orderCode} đã bị chủ shop từ chối.${reason ? ` Lý do: ${reason}` : ""}`,
+    type: NOTIFICATION_TYPE.RENTAL_ORDER,
+    link: `/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
 
   return order;
 };
@@ -465,6 +487,16 @@ const handoverOrder = async (
   // AC: order chuyển đúng trạng thái
   order.status = targetStatus;
   await order.save();
+
+  // [BE-S6-02] Bắn thông báo gửi hàng / bàn giao
+  sendSystemNotificationSafe({
+    userId: order.renterId || order.userId,
+    title: "Đơn thuê đã được gửi hàng",
+    message: `Đơn thuê ${order.orderCode} đã được bàn giao vận chuyển (${carrierName || "Đơn vị vận chuyển"}).`,
+    type: NOTIFICATION_TYPE.RENTAL_ORDER,
+    link: `/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, trackingCode },
+  });
 
   return order;
 };
@@ -624,6 +656,16 @@ const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}
   order.status = RENTAL_ORDER_STATUS.RETURN_REQUESTED;
   await order.save();
 
+  // [BE-S6-02] Bắn thông báo yêu cầu trả đồ
+  sendSystemNotificationSafe({
+    userId: order.shopOwnerId,
+    title: "Yêu cầu trả đồ mới",
+    message: `Khách hàng đã gửi yêu cầu trả đồ cho đơn thuê ${order.orderCode}.`,
+    type: NOTIFICATION_TYPE.RETURN,
+    link: `/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   try {
     const trackingCode = `VN-${(order.orderCode || "").replace(/\D/g, "").slice(-6) || Date.now().toString().slice(-6)}-RNT`;
     await RentalReturn.findOneAndUpdate(
@@ -778,6 +820,16 @@ const inspectAndRefundOrder = async (
   // 6. Sau kiểm định, order chuyển COMPLETED
   order.status = RENTAL_ORDER_STATUS.COMPLETED;
   await order.save();
+
+  // [BE-S6-02] Bắn thông báo hoàn cọc
+  sendSystemNotificationSafe({
+    userId: order.renterId || order.userId,
+    title: "Hoàn cọc đơn thuê hoàn tất",
+    message: `Đơn thuê ${order.orderCode} đã hoàn tất kiểm định và xử lý hoàn cọc (${refundAmount.toLocaleString("vi-VN")} VND).`,
+    type: NOTIFICATION_TYPE.REFUND,
+    link: `/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, refundAmount },
+  });
 
   try {
     const isApproved = penalty === 0;

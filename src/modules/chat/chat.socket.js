@@ -245,3 +245,11 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
 export const getIO = () => {
   return io;
 };
+
+/**
+ * Cập nhật instance của Socket.IO Server
+ */
+export const setIO = (newIO) => {
+  io = newIO;
+  return io;
+};

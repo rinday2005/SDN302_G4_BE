@@ -5,6 +5,8 @@ import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
 import ThriftOrder from "../thrift/order/thriftOrder.model.js";
 import User from "../user/user.model.js";
 import PlatformConfig from "./platformConfig.model.js";
+import { sendSystemNotificationSafe } from "../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 
 const createError = (message, statusCode = 400, errorCode = "BAD_REQUEST") => {
   const error = new Error(message);
@@ -168,6 +170,22 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
     }
 
     await product.save();
+
+    // [BE-S6-02] Bắn thông báo kết quả duyệt listing RENT
+    if (product.ownerId) {
+      sendSystemNotificationSafe({
+        userId: product.ownerId,
+        title: status === "APPROVED" ? "Sản phẩm cho thuê đã được duyệt" : "Sản phẩm cho thuê bị từ chối",
+        message:
+          status === "APPROVED"
+            ? `Sản phẩm "${product.name}" đã được Admin phê duyệt và hiển thị trên hệ thống.`
+            : `Sản phẩm "${product.name}" bị từ chối.${product.rejectionReason ? ` Lý do: ${product.rejectionReason}` : ""}`,
+        type: NOTIFICATION_TYPE.LISTING,
+        link: `/rent/products/${product._id}`,
+        metadata: { productId: product._id, status },
+      });
+    }
+
     return { type: "RENT", item: product };
   } else if (normalizedType === "thrift") {
     const listing = await ThriftListing.findById(id);
@@ -185,6 +203,22 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
     }
 
     await listing.save();
+
+    // [BE-S6-02] Bắn thông báo kết quả duyệt listing THRIFT
+    if (listing.ownerId) {
+      sendSystemNotificationSafe({
+        userId: listing.ownerId,
+        title: status === "APPROVED" ? "Mục đăng thanh lý đã được duyệt" : "Mục đăng thanh lý bị từ chối",
+        message:
+          status === "APPROVED"
+            ? `Mục đăng "${listing.name}" đã được Admin phê duyệt và hiển thị trên sàn.`
+            : `Mục đăng "${listing.name}" bị từ chối.${listing.rejectionReason ? ` Lý do: ${listing.rejectionReason}` : ""}`,
+        type: NOTIFICATION_TYPE.LISTING,
+        link: `/thrift/${listing._id}`,
+        metadata: { listingId: listing._id, status },
+      });
+    }
+
     return { type: "THRIFT", item: listing };
   } else {
     // Tự động tìm trong RentalProduct hoặc ThriftListing

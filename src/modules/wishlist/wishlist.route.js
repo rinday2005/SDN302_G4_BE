@@ -7,6 +7,7 @@ import {
   removeFromWishlistController,
   clearWishlistController,
 } from "./wishlist.controller.js";
+import { validateToggleWishlist } from "./wishlist.validation.js";
 
 const router = Router();
 
@@ -14,18 +15,23 @@ const router = Router();
 router.use(authMiddleware);
 
 // 1. Lấy danh sách yêu thích
+// GET /api/wishlist
 router.get("/", getWishlistController);
 
 // 2. Thêm sản phẩm vào danh sách yêu thích
-router.post("/", addToWishlistController);
+// POST /api/wishlist
+router.post("/", validateToggleWishlist, addToWishlistController);
 
 // 3. Toggle trạng thái yêu thích (Thêm nếu chưa có, Xóa nếu đã có)
-router.post("/toggle", toggleWishlistController);
+// POST /api/wishlist/toggle
+router.post("/toggle", validateToggleWishlist, toggleWishlistController);
 
 // 4. Xóa một sản phẩm khỏi danh sách yêu thích
+// DELETE /api/wishlist/:productId
 router.delete("/:productId", removeFromWishlistController);
 
 // 5. Xóa toàn bộ danh sách yêu thích
+// DELETE /api/wishlist
 router.delete("/", clearWishlistController);
 
 export default router;
