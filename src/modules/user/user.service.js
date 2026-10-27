@@ -18,6 +18,7 @@ export const formatUserResponse = (user) => {
     kycStatus: user.kycStatus || null,
     kyc: user.kyc || null,
     address: user.address || null,
+    walletBalance: Number(user.walletBalance) || 0,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

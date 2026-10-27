@@ -339,6 +339,16 @@ const createDisputeOrderController = async (req, res, next) => {
   }
 };
 
+
+const getShopFinancialSummaryController = async (req, res, next) => {
+  try {
+    const summary = await getShopFinancialLedgerService(req.user);
+    return successResponse(res, "Lấy sổ quyết toán doanh thu xưởng thành công", summary, 200);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createOrderController,
   getUserOrdersController,
