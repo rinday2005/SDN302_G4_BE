@@ -37,7 +37,7 @@ router.post("/", authorize(["USER"]), validateCreateOrder, createOrderController
 router.get("/my-orders", getUserOrdersController);
 
 // Shop Owner xem đơn thuê của shop / Admin xem tất cả
-router.get("/shop", authorize(["SHOP_OWNER", "ADMIN"]), getAllOrdersController);
+router.get("/shop", authorize(["SHOP_OWNER", "ADMIN", "USER"]), getAllOrdersController);
 
 // Shop Owner phê duyệt đơn thuê -> chuyển sang WAITING_PAYMENT
 router.post("/:id/approve", authorize(["SHOP_OWNER"]), approveOrderController);

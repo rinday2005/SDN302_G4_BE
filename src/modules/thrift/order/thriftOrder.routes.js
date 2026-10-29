@@ -29,9 +29,9 @@ router.post("/checkout", validateCheckoutThriftOrder, checkoutThriftOrder);
 router.get("/my-orders", getMyThriftOrders);
 
 // Xem danh sách đơn của người bán (Shop Owner)
-router.get("/seller-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
-router.get("/shop", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
-router.get("/shop-orders", authorize(["SHOP_OWNER", "ADMIN"]), getSellerThriftOrders);
+router.get("/seller-orders", authorize(["SHOP_OWNER", "ADMIN", "USER"]), getSellerThriftOrders);
+router.get("/shop", authorize(["SHOP_OWNER", "ADMIN", "USER"]), getSellerThriftOrders);
+router.get("/shop-orders", authorize(["SHOP_OWNER", "ADMIN", "USER"]), getSellerThriftOrders);
 
 // Xem chi tiết đơn hàng (Chặn IDOR)
 router.get("/:id", getThriftOrderById);

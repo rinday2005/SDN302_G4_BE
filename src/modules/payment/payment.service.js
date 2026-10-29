@@ -5,6 +5,8 @@ import RentalProduct from "../rent/product/product.model.js";
 import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
 import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
+import { sendSystemNotificationSafe } from "../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 import {
   buildVnPayUrl,
   verifyVnPaySignature,
@@ -323,6 +325,19 @@ const processVnPayIpn = async (queryParams = {}) => {
         bankCode: queryParams.vnp_BankCode || "",
         vnpResponse: queryParams,
         paidAt: new Date(),
+      });
+    }
+
+    // [BE-S6-02] Bắn thông báo thanh toán thành công
+    const payerId = order.renterId || order.buyerId || order.userId;
+    if (payerId) {
+      sendSystemNotificationSafe({
+        userId: payerId,
+        title: "Thanh toán thành công",
+        message: `Đơn hàng ${order.orderCode} đã thanh toán thành công qua VNPAY (${(order.totalAmount || 0).toLocaleString("vi-VN")} VND).`,
+        type: NOTIFICATION_TYPE.PAYMENT,
+        link: isThrift ? `/thrift-orders/${order._id}` : `/orders/${order._id}`,
+        metadata: { orderId: order._id, orderCode: order.orderCode, isThrift },
       });
     }
 
