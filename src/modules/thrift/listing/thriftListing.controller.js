@@ -66,4 +66,34 @@ export const convertFromRental = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
+};
+
+export const getShopThriftListings = async (req, res, next) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const listings = await thriftService.getShopListings(userId);
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách bài đăng thanh lý của shop thành công",
+      data: listings,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteThriftListing = async (req, res, next) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const { id } = req.params;
+    const result = await thriftService.deleteListing(id, userId);
+    return res.status(200).json({
+      success: true,
+      message: "Xóa sản phẩm thanh lý thành công",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

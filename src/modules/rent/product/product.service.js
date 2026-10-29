@@ -546,10 +546,19 @@ const getPublicProductDetail = async (productId) => {
   };
 };
 
+const getShopProducts = async (ownerId) => {
+  const products = await RentalProduct.find({ ownerId })
+    .populate("categoryId", "name slug")
+    .sort({ createdAt: -1 })
+    .lean();
+  return products;
+};
+
 export {
   createProduct,
   updateProduct,
   deleteProduct,
   getPublicProducts,
   getPublicProductDetail,
-};
+  getShopProducts,
+};
