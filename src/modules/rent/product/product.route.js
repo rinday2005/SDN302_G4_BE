@@ -7,6 +7,7 @@ import {
   deleteProductController,
   getPublicProductsController,
   getPublicProductDetailController,
+  getShopProductsController,
 } from "./product.controller.js";
 
 const router = express.Router();
@@ -43,12 +44,22 @@ router.get(
 );
 
 /**
+ * SHOP_OWNER lấy toàn bộ sản phẩm của shop mình (bao gồm PENDING, APPROVED, REJECTED)
+ */
+router.get(
+  "/shop/mine",
+  authMiddleware,
+  requireShopOwner,
+  getShopProductsController
+);
+
+/**
  * [BE-S2-06]
  * GET /api/rent/products/:id
  *
  * Product detail + Shop Owner + Availability Calendar
  *
- * Route này phải đặt TRƯỚC authMiddleware
+ * Route này phải đặt SAU /shop/mine để tránh nuốt URL
  * để Guest có thể xem sản phẩm APPROVED.
  */
 router.get(

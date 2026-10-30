@@ -4,6 +4,7 @@ import {
   deleteProduct,
   getPublicProducts,
   getPublicProductDetail,
+  getShopProducts,
 } from "./product.service.js";
 
 /**
@@ -133,10 +134,29 @@ const getPublicProductDetailController = async (
   }
 };
 
+/**
+ * SHOP_OWNER lấy danh sách tất cả sản phẩm của shop mình từ MongoDB
+ */
+const getShopProductsController = async (req, res, next) => {
+  try {
+    const ownerId = req.user?._id || req.user?.id;
+    const products = await getShopProducts(ownerId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách sản phẩm của shop thành công",
+      data: products,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   createProductController,
   updateProductController,
   deleteProductController,
   getPublicProductsController,
   getPublicProductDetailController,
-};
+  getShopProductsController,
+};

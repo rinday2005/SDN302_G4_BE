@@ -7,6 +7,15 @@ const router = express.Router();
 
 // Public: Xem danh sách bài đăng (chỉ lấy status APPROVED)
 router.get("/", thriftController.getPublicThriftListings);
+
+// Shop Owner: Lấy danh sách sản phẩm thanh lý của mình
+router.get(
+  "/shop/mine",
+  authMiddleware,
+  authorize(["SHOP_OWNER"]),
+  thriftController.getShopThriftListings
+);
+
 router.get("/:id", thriftController.getThriftListingById);
 
 // Private: Chỉ Shop Owner mới có quyền tạo và sửa
@@ -32,4 +41,11 @@ router.put(
   thriftController.updateThriftListing
 );
 
-export default router;
+router.delete(
+  "/:id",
+  authMiddleware,
+  authorize(["SHOP_OWNER"]),
+  thriftController.deleteThriftListing
+);
+
+export default router;

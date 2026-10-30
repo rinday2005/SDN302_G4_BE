@@ -166,4 +166,29 @@ export const convertFromRental = async (userId, data) => {
   });
 
   return newListing;
-};
+};
+
+// 6. Lấy toàn bộ bài đăng thanh lý của Shop Owner từ MongoDB
+export const getShopListings = async (userId) => {
+  return await ThriftListing.find({ ownerId: userId })
+    .populate("categoryId", "name")
+    .sort({ createdAt: -1 })
+    .lean();
+};
+
+// 7. Xóa bài đăng thanh lý của Shop Owner
+export const deleteListing = async (listingId, userId) => {
+  const listing = await ThriftListing.findById(listingId);
+  if (!listing) {
+    const error = new Error("Sản phẩm thanh lý không tồn tại");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (listing.ownerId.toString() !== userId.toString()) {
+    const error = new Error("Bạn không có quyền xóa listing này");
+    error.statusCode = 403;
+    throw error;
+  }
+  await listing.deleteOne();
+  return listing;
+};
