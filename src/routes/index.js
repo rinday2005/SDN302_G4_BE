@@ -255,6 +255,8 @@ router.use("/api/notification", notificationRoutes);
 // SHOP OWNER (PROFILE & REVENUE ANALYTICS)
 // ======================================================
 import shopRoutes from "../modules/shop/shop.route.js";
+import aiRoutes from "../modules/ai/ai.route.js";
+router.use("/api/ai", aiRoutes);
 router.use("/api/shop", shopRoutes);
 router.use("/shop", shopRoutes);
 
