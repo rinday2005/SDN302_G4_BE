@@ -251,4 +251,11 @@ router.use("/api/chat", chatRoutes);
 router.use("/api/notifications", notificationRoutes);
 router.use("/api/notification", notificationRoutes);
 
+// ======================================================
+// SHOP OWNER (PROFILE & REVENUE ANALYTICS)
+// ======================================================
+import shopRoutes from "../modules/shop/shop.route.js";
+router.use("/api/shop", shopRoutes);
+router.use("/shop", shopRoutes);
+
 export default router;

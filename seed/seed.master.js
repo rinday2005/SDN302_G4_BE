@@ -5,6 +5,7 @@ import connectDB from "../src/config/db.js";
 import Category from "../src/modules/category/category.model.js";
 import User from "../src/modules/user/user.model.js";
 import Product from "../src/modules/rent/product/product.model.js";
+import ThriftListing from "../src/modules/thrift/listing/thriftListing.model.js";
 import Cart from "../src/modules/cart/cart.model.js";
 import KycRecord, { KYC_STATUS } from "../src/modules/kyc/kyc.model.js";
 
@@ -404,6 +405,140 @@ const seedProducts = async (categories) => {
   console.log("8 Marketplace products seeded into MongoDB rentalProducts collection");
 };
 
+const seedThriftListings = async (categories) => {
+  const shopOwner = await User.findOne({ email: "shopowner@reuse.vn" });
+  if (!shopOwner) return;
+
+  // Xóa các bài đăng cũ của shop owner để nạp danh sách quần áo và giày dép nữ
+  await ThriftListing.deleteMany({ ownerId: shopOwner._id });
+
+  const clothingCat = categories.find((c) => c.slug === "clothing") || categories[0];
+  const partyDressCat = categories.find((c) => c.slug === "dam-du-tiec") || clothingCat;
+  const shoesCat = categories.find((c) => c.slug === "shoes") || categories[0];
+
+  const sampleThrift = [
+    {
+      name: "Đầm Dạ Hội Nữ Maxi Sequins Xẻ Tà Sang Trọng",
+      description: "Đầm dạ hội nữ dáng dài xẻ tà quyến rũ, đính đá và kim sa ánh bạc thủ công tinh xảo. Form dáng ôm tôn đường cong hoàn hảo, chất liệu tơ tằm sang trọng được thanh lý sau mùa diễn.",
+      categoryId: partyDressCat._id,
+      ownerId: shopOwner._id,
+      price: 1850000,
+      condition: "Như mới (99%)",
+      status: "APPROVED",
+      sourceType: "FROM_RENTAL",
+      location: "Hà Nội",
+      quantity: 2,
+      images: [
+        "https://images.unsplash.com/photo-1566174053879-31528523f8ae?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Giày Cao Gót Nữ Mũi Nhọn Ánh Kim Cao Cấp 9cm",
+      description: "Giày cao gót nữ mũi nhọn màu ánh kim bạc quyến rũ, gót nhọn 9cm tôn dáng thanh mảnh, đệm lót êm ái đi tiệc không đau chân.",
+      categoryId: shoesCat._id,
+      ownerId: shopOwner._id,
+      price: 1250000,
+      condition: "Như mới (99%)",
+      status: "APPROVED",
+      sourceType: "MANUAL",
+      location: "Hà Nội",
+      quantity: 2,
+      images: [
+        "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Áo Dài Nữ Cách Tân Lụa Gấm Thêu Hoa Sen",
+      description: "Áo dài cách tân nữ 4 tà dệt hoa sen chìm sắc nét, cổ trụ 3 phân thanh thoát, tà áo thướt tha, giữ gìn cẩn thận form dáng hoàn mỹ.",
+      categoryId: clothingCat._id,
+      ownerId: shopOwner._id,
+      price: 950000,
+      condition: "Rất tốt (98%)",
+      status: "APPROVED",
+      sourceType: "MANUAL",
+      location: "Hà Nội",
+      quantity: 3,
+      images: [
+        "https://images.unsplash.com/photo-1617059063772-34532796cdb5?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Giày Boots Nữ Da Cổ Lửng Vintage Màu Camel",
+      description: "Boots nữ da thật cổ lửng phong cách vintage, đế vuông 5cm êm chân dễ phối với đầm vintage hoặc chân váy dài mùa thu đông.",
+      categoryId: shoesCat._id,
+      ownerId: shopOwner._id,
+      price: 1100000,
+      condition: "Rất tốt (97%)",
+      status: "APPROVED",
+      sourceType: "MANUAL",
+      location: "Đà Nẵng",
+      quantity: 1,
+      images: [
+        "https://images.unsplash.com/photo-1542295669297-4d352b042bca?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Áo Blazer Nữ Oversize Họa Tiết Caro Phong Cách Seoul",
+      description: "Blazer dáng suông nữ tính trẻ trung năng động, cầu vai tự nhiên đứng form, chất vải dệt cao cấp, sản phẩm đang chờ Hội đồng thẩm định duyệt bài.",
+      categoryId: clothingCat._id,
+      ownerId: shopOwner._id,
+      price: 680000,
+      condition: "Tốt (95%)",
+      status: "PENDING",
+      sourceType: "MANUAL",
+      location: "Hà Nội",
+      quantity: 2,
+      images: [
+        "https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Giày Sneaker Nữ Cổ Thấp Phối Màu Pastel Năng Động",
+      description: "Sneaker nữ phom dáng ôm chân phối màu pastel ngọt ngào, chất liệu da mềm phối lưới thông thoáng. Đã thanh lý hoàn tất thành công cho khách hàng quen.",
+      categoryId: shoesCat._id,
+      ownerId: shopOwner._id,
+      price: 520000,
+      condition: "Đã qua sử dụng (92%)",
+      status: "SOLD",
+      sourceType: "MANUAL",
+      location: "Đà Nẵng",
+      quantity: 0,
+      images: [
+        "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+    {
+      name: "Bản Nháp: Set Váy Tweed Dạ Nữ Tiểu Thư Kèm Áo Croptop",
+      description: "Hồ sơ bản nháp set dạ tweed nữ tiểu thư đang hoàn thiện hình ảnh chi tiết và bảng đo size 3 vòng trước khi gửi kiểm định.",
+      categoryId: partyDressCat._id,
+      ownerId: shopOwner._id,
+      price: 890000,
+      condition: "Như mới (99%)",
+      status: "DRAFT",
+      sourceType: "MANUAL",
+      location: "Hà Nội",
+      quantity: 1,
+      images: [
+        "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800&auto=format&fit=crop&q=80",
+      ],
+    },
+  ];
+
+  for (const item of sampleThrift) {
+    await ThriftListing.findOneAndUpdate(
+      { name: item.name },
+      item,
+      {
+        upsert: true,
+        returnDocument: "after",
+        setDefaultsOnInsert: true,
+      }
+    );
+  }
+
+  console.log(`${sampleThrift.length} Quần áo / Thời trang Thrift listings seeded into MongoDB thriftListings collection`);
+};
+
 const runSeed = async () => {
   try {
     await connectDB();
@@ -412,6 +547,7 @@ const runSeed = async () => {
     await seedUsers();
     await seedKyc();
     await seedProducts(categories);
+    await seedThriftListings(categories);
 
     console.log("Master seed completed successfully");
   } catch (error) {

@@ -92,6 +92,57 @@ const userSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
+    shopProfile: {
+      shopName: {
+        type: String,
+        trim: true,
+        default: "Atelier Chronos & Optics Ltd.",
+      },
+      description: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      specialization: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      roleTitle: {
+        type: String,
+        trim: true,
+        default: "Master Curator & Archival Custodian",
+      },
+      secondaryEmail: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      businessAddress: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      cityRegion: {
+        type: String,
+        trim: true,
+        default: "Ho Chi Minh City, Vietnam",
+      },
+      coverUrl: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      rating: {
+        type: Number,
+        default: 5.0,
+      },
+      establishedYear: {
+        type: Number,
+        default: 2024,
+      },
+    },
   },
   {
     timestamps: true,
