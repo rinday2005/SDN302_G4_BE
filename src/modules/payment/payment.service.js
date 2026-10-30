@@ -11,6 +11,7 @@ import {
   buildVnPayUrl,
   verifyVnPaySignature,
 } from "./vnpay.utils.js";
+import { calculateShippingFee, normalizeShopBranch } from "../../utils/shipping.js";
 import {
   VNPAY_TMN_CODE,
   VNPAY_HASH_SECRET,
@@ -94,6 +95,43 @@ const createVnPayPaymentUrl = async ({
     const buyerId = order.renterId || order.buyerId || order.userId;
     if (buyerId && buyerId.toString() !== user._id.toString()) {
       throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
+    }
+    if (!isThrift && !(order.items && order.items[0]?.listingId)) {
+      let hasUpdates = false;
+      if (startDate) { order.startDate = new Date(startDate); hasUpdates = true; }
+      if (endDate) { order.endDate = new Date(endDate); hasUpdates = true; }
+      if (shippingAddress && shippingAddress.province) {
+        order.shippingAddress = {
+          recipientName: shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "Khách hàng",
+          recipientPhone: shippingAddress.recipientPhone || order.shippingAddress?.recipientPhone || user.phoneNumber || "0900000000",
+          province: shippingAddress.province || order.shippingAddress?.province || "Đà Nẵng",
+          district: shippingAddress.district || order.shippingAddress?.district || "Quận Hải Châu",
+          ward: shippingAddress.ward || order.shippingAddress?.ward || "Phường Hải Châu 1",
+          detail: shippingAddress.detail || order.shippingAddress?.detail || "Địa chỉ mặc định",
+        };
+        hasUpdates = true;
+      }
+      if (rentalFee && Number(rentalFee) > 0) { order.rentalFee = Number(rentalFee); hasUpdates = true; }
+      if (depositAmount && Number(depositAmount) > 0) { order.depositAmount = Number(depositAmount); hasUpdates = true; }
+      if (shippingFee && Number(shippingFee) > 0) {
+        order.shippingFee = Number(shippingFee);
+        hasUpdates = true;
+      } else {
+        const firstPid = order.items?.[0]?.productId;
+        const pDoc = firstPid && mongoose.Types.ObjectId.isValid(firstPid) ? await RentalProduct.findById(firstPid).select("location").lean() : null;
+        const branch = normalizeShopBranch(pDoc?.location || order.items?.[0]?.location || "Đà Nẵng");
+        const custProv = order.shippingAddress?.province || order.shippingAddress?.detail || "Đà Nẵng";
+        try { order.shippingFee = calculateShippingFee(branch, custProv); } catch { order.shippingFee = 35000; }
+        hasUpdates = true;
+      }
+      const computedTotal = (Number(order.rentalFee) || 0) + (Number(order.depositAmount) || 0) + (Number(order.shippingFee) || 0);
+      if (computedTotal > 0 && order.totalAmount !== computedTotal) {
+        order.totalAmount = computedTotal;
+        hasUpdates = true;
+      }
+      if (hasUpdates) {
+        await order.save();
+      }
     }
     payAmount = order.totalAmount;
     code = order.orderCode;

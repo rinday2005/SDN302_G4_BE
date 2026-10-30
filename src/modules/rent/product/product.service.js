@@ -1,6 +1,61 @@
 import mongoose from "mongoose";
 import RentalProduct from "./product.model.js";
 import RentalOrder from "../order/order.model.js";
+import cloudinary from "../../../config/cloudinary.js";
+import { normalizeShopBranch } from "../../../utils/shipping.js";
+
+const FALLBACK_PRODUCT_IMAGE =
+  "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80";
+
+const uploadBase64ListToCloudinary = async (images = []) => {
+  if (!Array.isArray(images)) return [];
+  const result = [];
+  for (const img of images) {
+    if (typeof img === "string" && img.startsWith("data:image/")) {
+      try {
+        const uploaded = await cloudinary.uploader.upload(img, {
+          folder: "reuse_hub/rental_products",
+          resource_type: "image",
+        });
+        result.push(uploaded.secure_url || uploaded.url || FALLBACK_PRODUCT_IMAGE);
+      } catch {
+        result.push(FALLBACK_PRODUCT_IMAGE);
+      }
+    } else if (typeof img === "string" && img.trim()) {
+      result.push(img.trim());
+    }
+  }
+  return result.length > 0 ? result : [FALLBACK_PRODUCT_IMAGE];
+};
+
+const sanitizeProductForClient = (product) => {
+  if (!product) return product;
+  const rawImages = Array.isArray(product.images) ? product.images : [];
+  let hasBase64 = false;
+
+  const cleanImages = rawImages.map((img) => {
+    if (typeof img === "string" && img.startsWith("data:")) {
+      hasBase64 = true;
+      return FALLBACK_PRODUCT_IMAGE;
+    }
+    return img;
+  });
+
+  if (hasBase64 && product._id) {
+    // Asynchronously migrate raw base64 images in DB to Cloudinary URLs
+    uploadBase64ListToCloudinary(rawImages)
+      .then((uploadedUrls) =>
+        RentalProduct.updateOne({ _id: product._id }, { $set: { images: uploadedUrls } })
+      )
+      .catch(() => {});
+  }
+
+  return {
+    ...product,
+    location: normalizeShopBranch(product.location),
+    images: cleanImages.length > 0 ? cleanImages : [FALLBACK_PRODUCT_IMAGE],
+  };
+};
 
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
@@ -22,9 +77,14 @@ const createProduct = async (productData, ownerId) => {
     ...safeData
   } = productData;
 
+  if (Array.isArray(safeData.images)) {
+    safeData.images = await uploadBase64ListToCloudinary(safeData.images);
+  }
+
   const product = await RentalProduct.create({
     ...safeData,
     ownerId,
+    location: normalizeShopBranch(safeData.location),
     status: "PENDING_APPROVAL",
   });
 
@@ -67,7 +127,12 @@ const updateProduct = async (productId, ownerId, updateData) => {
     ...safeUpdateData
   } = updateData;
 
+  if (Array.isArray(safeUpdateData.images)) {
+    safeUpdateData.images = await uploadBase64ListToCloudinary(safeUpdateData.images);
+  }
+
   Object.assign(product, safeUpdateData);
+  if (safeUpdateData.location !== undefined) product.location = normalizeShopBranch(safeUpdateData.location);
 
   await product.save();
 
@@ -303,7 +368,7 @@ const getPublicProducts = async (query = {}) => {
   ]);
 
   return {
-    products,
+    products: products.map(sanitizeProductForClient),
 
     pagination: {
       total,
@@ -534,7 +599,7 @@ const getPublicProductDetail = async (productId) => {
   }
 
   return {
-    product,
+    product: sanitizeProductForClient(product),
 
     availability: {
       totalQuantity:
@@ -547,11 +612,20 @@ const getPublicProductDetail = async (productId) => {
 };
 
 const getShopProducts = async (ownerId) => {
-  const products = await RentalProduct.find({ ownerId })
-    .populate("categoryId", "name slug")
-    .sort({ createdAt: -1 })
-    .lean();
-  return products;
+  let products = [];
+  if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
+    products = await RentalProduct.find({ ownerId })
+      .populate("categoryId", "name slug")
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+  if (products.length === 0) {
+    products = await RentalProduct.find({})
+      .populate("categoryId", "name slug")
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+  return products.map(sanitizeProductForClient);
 };
 
 export {

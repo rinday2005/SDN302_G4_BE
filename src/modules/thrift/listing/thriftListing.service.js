@@ -2,14 +2,72 @@ import ThriftListing from "./thriftListing.model.js";
 import RentalProduct from "../../rent/product/product.model.js";
 import RentalOrder from "../../rent/order/order.model.js";
 import RentalAvailability from "../../rent/availability/availability.model.js";
+import cloudinary from "../../../config/cloudinary.js";
+import { normalizeShopBranch } from "../../../utils/shipping.js";
+
+const FALLBACK_THRIFT_IMAGE =
+  "https://images.unsplash.com/photo-1566174053879-31528523f8ae?w=800&auto=format&fit=crop&q=80";
+
+const uploadBase64ThriftImages = async (images = []) => {
+  if (!Array.isArray(images)) return [];
+  const result = [];
+  for (const img of images) {
+    if (typeof img === "string" && img.startsWith("data:image/")) {
+      try {
+        const uploaded = await cloudinary.uploader.upload(img, {
+          folder: "reuse_hub/thrift_listings",
+          resource_type: "image",
+        });
+        result.push(uploaded.secure_url || uploaded.url || FALLBACK_THRIFT_IMAGE);
+      } catch {
+        result.push(FALLBACK_THRIFT_IMAGE);
+      }
+    } else if (typeof img === "string" && img.trim()) {
+      result.push(img.trim());
+    }
+  }
+  return result.length > 0 ? result : [FALLBACK_THRIFT_IMAGE];
+};
+
+const sanitizeThriftForClient = (item) => {
+  if (!item) return item;
+  const rawImages = Array.isArray(item.images) ? item.images : [];
+  let hasBase64 = false;
+  const cleanImages = rawImages.map((img) => {
+    if (typeof img === "string" && img.startsWith("data:")) {
+      hasBase64 = true;
+      return FALLBACK_THRIFT_IMAGE;
+    }
+    return img;
+  });
+
+  if (hasBase64 && item._id) {
+    uploadBase64ThriftImages(rawImages)
+      .then((uploadedUrls) =>
+        ThriftListing.updateOne({ _id: item._id }, { $set: { images: uploadedUrls } })
+      )
+      .catch(() => {});
+  }
+
+  return {
+    ...item,
+    location: normalizeShopBranch(item.location),
+    images: cleanImages.length > 0 ? cleanImages : [FALLBACK_THRIFT_IMAGE],
+  };
+};
 
 // 1. Tạo listing mới (Shop Owner)
 export const createListing = async (userId, data) => {
+  const safeData = { ...data, location: normalizeShopBranch(data?.location) };
+  if (Array.isArray(safeData.images)) {
+    safeData.images = await uploadBase64ThriftImages(safeData.images);
+  }
   // AC: ownerId không lấy tự do từ body, gán từ req.user.id
   // AC: status mặc định luôn là PENDING_APPROVAL
   const newListing = await ThriftListing.create({
-    ...data,
+    ...safeData,
     ownerId: userId,
+
     status: "PENDING_APPROVAL",
   });
   return newListing;
@@ -33,6 +91,9 @@ export const updateListing = async (listingId, userId, updateData) => {
 
   // Chặn ghi đè ownerId từ client
   delete updateData.ownerId;
+  if (updateData.location !== undefined) {
+    updateData.location = normalizeShopBranch(updateData.location);
+  }
 
   Object.assign(listing, updateData);
   await listing.save();
@@ -54,7 +115,8 @@ export const getPublicListings = async (query = {}) => {
     // Luôn giữ các sản phẩm đã bán/đã mua (SOLD) hiển thị trên Thrift Marketplace
     filter.status = { $in: ["APPROVED", "SOLD"] };
   }
-  return await ThriftListing.find(filter).populate("categoryId", "name").lean();
+  const items = await ThriftListing.find(filter).populate("categoryId", "name").lean();
+  return items.map(sanitizeThriftForClient);
 };
 
 // 4. Lấy chi tiết listing theo ID
@@ -153,13 +215,14 @@ export const convertFromRental = async (userId, data) => {
 
   const newListing = await ThriftListing.create({
     ownerId: userId,
+
     name: name || rentalProduct.name,
     description: conditionDescription || description || rentalProduct.description || "",
     price: Number(finalSellingPrice),
     condition: condition || rentalProduct.condition || "GOOD",
     images: thriftImages,
     categoryId: categoryId || rentalProduct.categoryId,
-    location: location || rentalProduct.location || "",
+    location: normalizeShopBranch(location || rentalProduct.location),
     status: "APPROVED",
     sourceType: "RENTAL_PRODUCT",
     sourceRentalProductId: rentalProduct._id,
@@ -170,10 +233,20 @@ export const convertFromRental = async (userId, data) => {
 
 // 6. Lấy toàn bộ bài đăng thanh lý của Shop Owner từ MongoDB
 export const getShopListings = async (userId) => {
-  return await ThriftListing.find({ ownerId: userId })
-    .populate("categoryId", "name")
-    .sort({ createdAt: -1 })
-    .lean();
+  let items = [];
+  if (userId) {
+    items = await ThriftListing.find({ ownerId: userId })
+      .populate("categoryId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+  if (items.length === 0) {
+    items = await ThriftListing.find({})
+      .populate("categoryId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+  return items.map(sanitizeThriftForClient);
 };
 
 // 7. Xóa bài đăng thanh lý của Shop Owner
