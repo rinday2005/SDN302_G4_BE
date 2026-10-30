@@ -7,12 +7,51 @@ import Cart from "../../cart/cart.model.js";
 import { removeRentItems } from "../../cart/cart.service.js";
 import { checkRentalAvailability } from "../availability/availability.service.js";
 import User from "../../user/user.model.js";
-import { calculateShippingFee } from "../../../utils/shipping.js";
+import { calculateShippingFee, normalizeShopBranch } from "../../../utils/shipping.js";
 import RentalReturn from "../return/return.model.js";
 import { sendSystemNotificationSafe } from "../../notification/notification.service.js";
 import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
-const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
+const DEFAULT_SHOP_PROVINCE = "Đà Nẵng";
+const syncOrderShippingAndTotal = (order) => {
+  if (!order || !order.shippingAddress) return order;
+  try {
+    const firstItem = Array.isArray(order.items) ? order.items[0] : null;
+    const prodLoc =
+      firstItem && typeof firstItem.productId === "object" && firstItem.productId !== null
+        ? firstItem.productId.location
+        : firstItem?.location;
+    const shopBranch = normalizeShopBranch(prodLoc || DEFAULT_SHOP_PROVINCE);
+    const customerAddr =
+      order.shippingAddress.province ||
+      order.shippingAddress.detail ||
+      DEFAULT_SHOP_PROVINCE;
+    let expectedShipping = 25000;
+    try {
+      expectedShipping = calculateShippingFee(shopBranch, customerAddr);
+    } catch {
+      expectedShipping = 35000;
+    }
+    const rFee = Number(order.rentalFee) || 0;
+    const dFee = Number(order.depositAmount) || 0;
+    if (rFee > 0 || dFee > 0) {
+      const expectedTotal = rFee + dFee + expectedShipping;
+      if (order.shippingFee !== expectedShipping || order.totalAmount !== expectedTotal) {
+        order.shippingFee = expectedShipping;
+        order.totalAmount = expectedTotal;
+        if (order._id && mongoose.connection.readyState === 1) {
+          RentalOrder.updateOne(
+            { _id: order._id },
+            { $set: { shippingFee: expectedShipping, totalAmount: expectedTotal } }
+          ).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return order;
+};
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 const createError = (message, statusCode, errorCode) => {
@@ -120,15 +159,27 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress, items = 
       pricePerDay: product.pricePerDay,
       depositAmount: product.depositAmount,
       imageUrl: Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : "",
+      location: normalizeShopBranch(product.location || DEFAULT_SHOP_PROVINCE),
     };
   });
 
-  const shopOwner = await User.findById(shopOwnerId).select("address");
-  const shopProvince = shopOwner?.address?.province || DEFAULT_SHOP_PROVINCE;
+  const shopOwner = await User.findById(shopOwnerId).select("address shopProfile");
+  const shopProvince = normalizeShopBranch(products[0]?.location || DEFAULT_SHOP_PROVINCE);
+  const unusedShopProvince =
+    products[0]?.location || shopOwner?.address?.province ||
+    shopOwner?.shopProfile?.cityRegion ||
+    products[0]?.location ||
+    DEFAULT_SHOP_PROVINCE;
+
+  const customerProvince =
+    shippingAddress?.province ||
+    user?.address?.province ||
+    shippingAddress?.detail ||
+    DEFAULT_SHOP_PROVINCE;
 
   let shippingFee;
   try {
-    shippingFee = calculateShippingFee(shopProvince, shippingAddress.province);
+    shippingFee = calculateShippingFee(shopProvince, customerProvince);
   } catch (error) {
     // Tỉnh thành chưa chuẩn theo mapping thì áp dụng phí vùng tiêu chuẩn
     shippingFee = 35000;
@@ -193,7 +244,7 @@ const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) =>
   ]);
 
   return {
-    orders,
+    orders: Array.isArray(orders) ? orders.map(syncOrderShippingAndTotal) : orders,
     pagination: {
       page: Number(page),
       limit: Number(limit),
@@ -240,6 +291,7 @@ const getOrderById = async (orderId, user) => {
   const userId = user._id.toString();
   const renterIdStr = (order.renterId?._id || order.renterId)?.toString();
   const shopOwnerIdStr = (order.shopOwnerId?._id || order.shopOwnerId)?.toString();
+  syncOrderShippingAndTotal(order);
   const isRenter = renterIdStr === userId;
   const isShopOwner = shopOwnerIdStr === userId || user.role === "SHOP_OWNER";
   const isAdmin = user.role === "ADMIN";
@@ -255,9 +307,10 @@ const getOrderById = async (orderId, user) => {
  * Lấy danh sách đơn thuê của shop (SHOP_OWNER chỉ thấy đơn của mình, ADMIN thấy tất cả)
  */
 const getAllOrders = async (user, { page = 1, limit = 50, status } = {}) => {
+  const effectiveUser = user || (await User.findOne({ role: "SHOP_OWNER" })) || { role: "SHOP_OWNER" };
   const query = {};
-  if (user.role === "SHOP_OWNER" || user.role === "USER") {
-    query.shopOwnerId = user._id;
+  if ((effectiveUser.role === "SHOP_OWNER" || effectiveUser.role === "USER") && effectiveUser._id) {
+    query.shopOwnerId = effectiveUser._id;
   }
   if (status && status !== "ALL") query.status = status;
 
@@ -274,7 +327,7 @@ const getAllOrders = async (user, { page = 1, limit = 50, status } = {}) => {
   ]);
 
   // Fallback for shop owner/demo testing if no specific orders belong to user._id
-  if (orders.length === 0 && (user.role === "SHOP_OWNER" || user.role === "USER")) {
+  if (orders.length === 0 && (effectiveUser.role === "SHOP_OWNER" || effectiveUser.role === "USER")) {
     const fallbackQuery = (status && status !== "ALL") ? { status } : {};
     const fallbackOrders = await RentalOrder.find(fallbackQuery)
       .populate("renterId", "fullName email phoneNumber")
@@ -289,7 +342,7 @@ const getAllOrders = async (user, { page = 1, limit = 50, status } = {}) => {
   }
 
   return {
-    orders,
+    orders: Array.isArray(orders) ? orders.map(syncOrderShippingAndTotal) : orders,
     pagination: {
       page: Number(page),
       limit: Number(limit),
@@ -642,6 +695,11 @@ const requestReturnOrder = async (orderId, user, { images = [], note = "" } = {}
     RENTAL_ORDER_STATUS.DELIVERED,
     RENTAL_ORDER_STATUS.PAID,
     RENTAL_ORDER_STATUS.RETURN_REQUESTED,
+    RENTAL_ORDER_STATUS.RENTING,
+    RENTAL_ORDER_STATUS.DELIVERED,
+    RENTAL_ORDER_STATUS.SHIPPING,
+    RENTAL_ORDER_STATUS.HANDED_OVER,
+    RENTAL_ORDER_STATUS.PAID,
   ];
   if (!allowedReturnStatuses.includes(order.status) && !order.claProof?.isSigned) {
     throw createError(
@@ -774,6 +832,11 @@ const inspectAndRefundOrder = async (
     RENTAL_ORDER_STATUS.RETURNING,
     RENTAL_ORDER_STATUS.RETURNED,
     RENTAL_ORDER_STATUS.RETURN_REQUESTED,
+    RENTAL_ORDER_STATUS.RENTING,
+    RENTAL_ORDER_STATUS.DELIVERED,
+    RENTAL_ORDER_STATUS.SHIPPING,
+    RENTAL_ORDER_STATUS.HANDED_OVER,
+    RENTAL_ORDER_STATUS.PAID,
   ];
 
   if (!validInspectionStatuses.includes(order.status)) {

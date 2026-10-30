@@ -81,6 +81,7 @@ const rentalOrderItemSchema = new mongoose.Schema(
       min: [0, "depositAmount phải lớn hơn hoặc bằng 0"],
       default: 0,
     },
+    location: { type: String, trim: true, default: "Đà Nẵng" },
     imageUrl: {
       type: String,
       trim: true,

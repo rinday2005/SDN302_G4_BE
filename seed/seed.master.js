@@ -1,12 +1,13 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 
-import connectDB from "../src/config/db.js";
+import connectDB, { syncUserCartsAndWishlists } from "../src/config/db.js";
 import Category from "../src/modules/category/category.model.js";
 import User from "../src/modules/user/user.model.js";
 import Product from "../src/modules/rent/product/product.model.js";
 import ThriftListing from "../src/modules/thrift/listing/thriftListing.model.js";
 import Cart from "../src/modules/cart/cart.model.js";
+import Wishlist from "../src/modules/wishlist/wishlist.model.js";
 import KycRecord, { KYC_STATUS } from "../src/modules/kyc/kyc.model.js";
 
 const seedCategories = async () => {
@@ -134,16 +135,8 @@ const seedUsers = async () => {
   );
   console.log("Sample User seeded (user@reuse.vn / Password123!)");
 
-  // Đảm bảo tất cả user trong hệ thống đều có 1 cart tương ứng (1 user - 1 cart)
-  const allUsers = await User.find({});
-  for (const u of allUsers) {
-    await Cart.findOneAndUpdate(
-      { userId: u._id },
-      { $setOnInsert: { userId: u._id, rentItems: [], thriftItems: [] } },
-      { upsert: true }
-    );
-  }
-  console.log(`Matched and initialized carts for all ${allUsers.length} users`);
+  // Đảm bảo tất cả user trong hệ thống đều có đúng 1 cart và 1 wishlist tương ứng (1 user - 1 cart - 1 wishlist)
+  await syncUserCartsAndWishlists();
 };
 
 
@@ -546,6 +539,7 @@ const runSeed = async () => {
     const categories = await seedCategories();
     await seedUsers();
     await seedKyc();
+    await syncUserCartsAndWishlists();
     await seedProducts(categories);
     await seedThriftListings(categories);
 

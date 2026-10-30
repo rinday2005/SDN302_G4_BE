@@ -6,7 +6,7 @@ import { removeThriftItems } from "../../cart/cart.service.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
 
-const DEFAULT_SHOP_PROVINCE = "Hồ Chí Minh";
+const DEFAULT_SHOP_PROVINCE = "Đà Nẵng";
 
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
@@ -134,11 +134,11 @@ export const checkoutThriftOrder = async ({
     shippingFee = Math.max(0, Number(customShippingFee));
   } else {
     // Tự động tính phí shipping dựa trên vùng giữa Shop/Seller và User
-    let sellerProvince = DEFAULT_SHOP_PROVINCE;
+    let sellerProvince = listings[0]?.location || DEFAULT_SHOP_PROVINCE;
     const firstOwnerId = listings[0]?.ownerId;
     if (firstOwnerId) {
       const owner = await User.findById(firstOwnerId).select("address");
-      if (owner?.address?.province) {
+      if (!listings[0]?.location && owner?.address?.province) {
         sellerProvince = owner.address.province;
       }
     }

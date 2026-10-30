@@ -67,15 +67,21 @@ export const resolveProductCandidate = async (productId, requestedType = null) =
 };
 
 /**
+ * Lấy Wishlist của user, tự tạo nếu chưa có (mỗi user chỉ có 1 Wishlist duy nhất)
+ */
+export const getOrCreateWishlist = async (userId) =>
+  Wishlist.findOneAndUpdate(
+    { userId },
+    { $setOnInsert: { userId, items: [] } },
+    { new: true, upsert: true }
+  );
+
+/**
  * Lấy danh sách sản phẩm yêu thích của người dùng (Hỗ trợ cả RENT và THRIFT)
  * AC: Chỉ User hiện tại được xem/sửa wishlist của mình; populate đúng dữ liệu item.
  */
 export const getUserWishlist = async (userId) => {
-  let wishlist = await Wishlist.findOne({ userId });
-
-  if (!wishlist) {
-    wishlist = await Wishlist.create({ userId, items: [] });
-  }
+  const wishlist = await getOrCreateWishlist(userId);
 
   let needsDbCorrection = false;
   const populatedItems = await Promise.all(
@@ -173,10 +179,7 @@ export const addToWishlist = async (userId, { itemId, itemType, productId, produ
   const effectiveId = candidate.resolvedId;
   const detectedType = candidate.resolvedType;
 
-  let wishlist = await Wishlist.findOne({ userId });
-  if (!wishlist) {
-    wishlist = await Wishlist.create({ userId, items: [] });
-  }
+  const wishlist = await getOrCreateWishlist(userId);
 
   const exists = wishlist.items.some((item) => {
     const id = (item.itemId || item.productId || "").toString();
@@ -216,10 +219,7 @@ export const toggleWishlist = async (userId, { itemId, itemType, productId, prod
   const effectiveId = candidate.resolvedId;
   const detectedType = candidate.resolvedType;
 
-  let wishlist = await Wishlist.findOne({ userId });
-  if (!wishlist) {
-    wishlist = await Wishlist.create({ userId, items: [] });
-  }
+  const wishlist = await getOrCreateWishlist(userId);
 
   const rawStr = String(targetId).trim();
   const effectiveIdStr = effectiveId.toString();
