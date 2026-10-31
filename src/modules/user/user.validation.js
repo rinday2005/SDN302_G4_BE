@@ -29,9 +29,9 @@ export const validateUpdateProfile = (req, res, next) => {
   // 2. Kiểm tra Số điện thoại
   const rawPhone = phoneNumber ?? phone;
   if (rawPhone !== undefined && rawPhone !== null && String(rawPhone).trim() !== "") {
-    const trimmedPhone = String(rawPhone).trim();
+    const cleanPhone = String(rawPhone).trim().replace(/[\s.-]/g, "");
     const phoneRegex = /^(0|\+84)(3[2-9]|5[2689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}$/;
-    if (!phoneRegex.test(trimmedPhone)) {
+    if (!phoneRegex.test(cleanPhone)) {
       return fail(
         next,
         "Số điện thoại không đúng định dạng (Ví dụ: 0901234567 hoặc +84901234567)",
