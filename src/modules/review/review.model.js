@@ -4,15 +4,26 @@ const reviewSchema = new mongoose.Schema(
   {
     orderId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "RentalOrder",
-      required: [true, "orderId là bắt buộc"],
+      default: null,
       index: true,
+    },
+
+    orderType: {
+      type: String,
+      enum: ["RENT", "THRIFT", null],
+      default: null,
     },
 
     productId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "RentalProduct",
       required: [true, "productId là bắt buộc"],
+      index: true,
+    },
+
+    productType: {
+      type: String,
+      enum: ["RENT", "THRIFT"],
+      default: "RENT",
       index: true,
     },
 
@@ -51,6 +62,17 @@ const reviewSchema = new mongoose.Schema(
         message: "Mỗi review được tối đa 5 hình ảnh",
       },
     },
+
+    source: {
+      type: String,
+      enum: ["PRODUCT_DETAIL", "RENT_ORDER", "THRIFT_ORDER"],
+      default: "PRODUCT_DETAIL",
+    },
+
+    isVerifiedPurchase: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -59,9 +81,9 @@ const reviewSchema = new mongoose.Schema(
 );
 
 /**
- * AC:
- * Mỗi User chỉ được review 1 lần cho mỗi product
- * trong cùng một order.
+ * AC: Mỗi User chỉ được review 1 lần cho mỗi product trong cùng một order.
+ * Áp dụng partialFilterExpression để các comment/review ở trang detail (orderId: null)
+ * không bị trùng lặp lỗi unique.
  */
 reviewSchema.index(
   {
@@ -71,15 +93,27 @@ reviewSchema.index(
   },
   {
     unique: true,
+    partialFilterExpression: { orderId: { $type: "objectId" } },
     name: "unique_order_product_user_review",
   }
 );
 
 /**
- * Tối ưu lấy review theo sản phẩm.
+ * Tối ưu truy vấn danh sách review theo sản phẩm trên Marketplace Detail.
  */
 reviewSchema.index({
   productId: 1,
+  createdAt: -1,
+});
+
+reviewSchema.index({
+  productId: 1,
+  productType: 1,
+  createdAt: -1,
+});
+
+reviewSchema.index({
+  userId: 1,
   createdAt: -1,
 });
 
