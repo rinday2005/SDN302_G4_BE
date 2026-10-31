@@ -259,5 +259,6 @@ import aiRoutes from "../modules/ai/ai.route.js";
 router.use("/api/ai", aiRoutes);
 router.use("/api/shop", shopRoutes);
 router.use("/shop", shopRoutes);
+router.use("/api/api/shop", shopRoutes);
 
 export default router;

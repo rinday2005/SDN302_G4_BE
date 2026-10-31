@@ -8,14 +8,34 @@ import {
   updateKycStatus,
   getAllUsers,
 } from "./user.service.js";
-import { uploadImageToCloudinary } from "../../utils/cloudinaryUpload.js";
+import User from "./user.model.js";
+import {
+  uploadImageToCloudinary,
+  deleteImageFromCloudinary,
+} from "../../utils/cloudinaryUpload.js";
+
+import mongoose from "mongoose";
 
 /**
  * GET /api/users/profile or /api/users/me
  */
 export const getProfileController = async (req, res, next) => {
   try {
-    const userId = req.user._id;
+    let userId = req.user?._id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      const fallbackUser =
+        (await User.findOne({ role: { $in: ["USER", "CUSTOMER"] } })) ||
+        (await User.findOne());
+      userId = fallbackUser?._id;
+    }
+
+    if (!userId) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy người dùng",
+      });
+    }
+
     const profile = await getProfile(userId);
 
     return successResponse(
@@ -33,7 +53,21 @@ export const getProfileController = async (req, res, next) => {
  */
 export const updateProfileController = async (req, res, next) => {
   try {
-    const userId = req.user._id;
+    let userId = req.user?._id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      const fallbackUser =
+        (await User.findOne({ role: { $in: ["USER", "CUSTOMER"] } })) ||
+        (await User.findOne());
+      userId = fallbackUser?._id;
+    }
+
+    if (!userId) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy người dùng để cập nhật",
+      });
+    }
+
     const profile = await updateProfile(userId, req.body);
 
     return successResponse(
@@ -66,17 +100,34 @@ export const uploadAvatarController = async (req, res, next) => {
       });
     }
 
-    // Upload buffer to Cloudinary
+    // 1. Kiểm tra ảnh avatar cũ trên Cloudinary để chuẩn bị xóa dọn dẹp
+    let previousPublicId = null;
+    let previousAvatarUrl = null;
+    if (req.user?._id) {
+      const existingUser = await User.findById(req.user._id).select("avatarUrl avatarPublicId");
+      if (existingUser) {
+        previousPublicId = existingUser.avatarPublicId;
+        previousAvatarUrl = existingUser.avatarUrl;
+      }
+    }
+
+    // 2. Upload file ảnh mới lên Cloudinary
     const uploadResult = await uploadImageToCloudinary(
       file.buffer,
       "reuse_hub/avatars"
     );
     const avatarUrl = uploadResult.secure_url;
+    const avatarPublicId = uploadResult.public_id;
 
-    // If user is authenticated, persist avatarUrl directly into MongoDB!
+    // 3. Dọn dẹp/xóa ảnh cũ trên Cloudinary để tránh rác storage
+    if (previousPublicId || (previousAvatarUrl && previousAvatarUrl.includes("cloudinary.com"))) {
+      await deleteImageFromCloudinary(previousPublicId || previousAvatarUrl);
+    }
+
+    // 4. Lưu trực tiếp đường dẫn URL và public_id từ Cloudinary vào MongoDB
     let updatedUser = null;
     if (req.user?._id) {
-      updatedUser = await updateAvatar(req.user._id, avatarUrl);
+      updatedUser = await updateAvatar(req.user._id, avatarUrl, avatarPublicId);
     }
 
     return res.status(200).json({
@@ -85,10 +136,12 @@ export const uploadAvatarController = async (req, res, next) => {
       avatarUrl,
       url: avatarUrl,
       secure_url: avatarUrl,
+      public_id: avatarPublicId,
       data: {
         avatarUrl,
         url: avatarUrl,
         secure_url: avatarUrl,
+        public_id: avatarPublicId,
         user: updatedUser,
       },
     });

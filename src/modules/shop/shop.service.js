@@ -29,7 +29,7 @@ export const getShopProfileService = async (userId) => {
   return {
     shopId: user._id,
     shopName: shopProfile.shopName || user.fullName || "Atelier Chronos & Optics Ltd.",
-    ownerName: user.fullName || "Vũ Thanh Tùng",
+    ownerName: user.fullName || "Phạm Thùy Dương",
     email: user.email,
     secondaryEmail: shopProfile.secondaryEmail || "",
     phoneNumber: user.phoneNumber || "",

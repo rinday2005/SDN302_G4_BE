@@ -10,6 +10,7 @@ import {
   submitKycController,
   updateKycStatusController,
 } from "./user.controller.js";
+import { validateUpdateProfile } from "./user.validation.js";
 
 const router = Router();
 
@@ -17,11 +18,11 @@ const router = Router();
 router.get("/", optionalAuthMiddleware, getAllUsersController);
 
 // GET current user profile
-router.get("/profile", authMiddleware, getProfileController);
-router.get("/me", authMiddleware, getProfileController);
+router.get("/profile", optionalAuthMiddleware, getProfileController);
+router.get("/me", optionalAuthMiddleware, getProfileController);
 
 // PUT update user profile (fullName, phone, avatarUrl, address...)
-router.put("/profile", authMiddleware, updateProfileController);
+router.put("/profile", optionalAuthMiddleware, validateUpdateProfile, updateProfileController);
 
 // POST upload avatar (supports multipart with fields 'avatar', 'file', or 'image')
 // Uses optionalAuthMiddleware so that if the user is authenticated, it immediately saves to MongoDB

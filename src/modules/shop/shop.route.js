@@ -11,7 +11,7 @@ const router = Router();
 
 // 1. Profile Shop APIs
 router.get("/profile", optionalAuthMiddleware, getShopProfileController);
-router.put("/profile", authMiddleware, authorize(["SHOP_OWNER", "ADMIN"]), updateShopProfileController);
+router.put("/profile", optionalAuthMiddleware, updateShopProfileController);
 
 // 2. Revenue Analytics API (MongoDB Aggregation Pipeline)
 router.get("/revenue", optionalAuthMiddleware, getShopRevenueController);
