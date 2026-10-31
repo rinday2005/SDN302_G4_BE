@@ -14,6 +14,7 @@ export const formatUserResponse = (user) => {
     phoneNumber: user.phoneNumber || null,
     phone: user.phoneNumber || null,
     avatarUrl: user.avatarUrl || null,
+    avatarPublicId: user.avatarPublicId || null,
     role: user.role,
     kycStatus: user.kycStatus || null,
     kyc: user.kyc || null,
@@ -56,6 +57,10 @@ export const updateProfile = async (userId, data) => {
 
   if (typeof data.avatarUrl === "string") {
     allowedFields.avatarUrl = data.avatarUrl.trim();
+  }
+
+  if (typeof data.avatarPublicId === "string") {
+    allowedFields.avatarPublicId = data.avatarPublicId.trim();
   }
 
   if (data.address) {
@@ -108,12 +113,17 @@ export const updateProfile = async (userId, data) => {
 };
 
 /**
- * Update user avatarUrl directly
+ * Update user avatarUrl and avatarPublicId directly
  */
-export const updateAvatar = async (userId, avatarUrl) => {
+export const updateAvatar = async (userId, avatarUrl, avatarPublicId = null) => {
+  const updateFields = { avatarUrl };
+  if (avatarPublicId) {
+    updateFields.avatarPublicId = avatarPublicId;
+  }
+
   const updatedUser = await User.findByIdAndUpdate(
     userId,
-    { $set: { avatarUrl } },
+    { $set: updateFields },
     { new: true }
   ).select("-passwordHash");
 
