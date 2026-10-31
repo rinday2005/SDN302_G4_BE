@@ -39,8 +39,8 @@ export const getShopProfileService = async (userId) => {
         ? [user.address.detail, user.address.ward, user.address.district, user.address.province]
             .filter(Boolean)
             .join(", ")
-        : ""),
-    cityRegion: shopProfile.cityRegion || "Ho Chi Minh City, Vietnam",
+        : "48 Bạch Đằng, Phường Hải Châu 1, Quận Hải Châu, Thành phố Đà Nẵng"),
+    cityRegion: shopProfile.cityRegion || user.address?.province || "Đà Nẵng, Việt Nam",
     avatarUrl: user.avatarUrl || "",
     coverUrl: shopProfile.coverUrl || "",
     description: shopProfile.description || "",
@@ -145,6 +145,11 @@ export const updateShopProfileService = async (userId, updateData) => {
   }
   if (updateData.cityRegion !== undefined) {
     user.shopProfile.cityRegion = updateData.cityRegion.trim();
+    user.address = {
+      ...(user.address?.toObject ? user.address.toObject() : user.address || {}),
+      province: updateData.cityRegion.split(",")[0].trim() || "Đà Nẵng",
+      detail: user.shopProfile.businessAddress || user.address?.detail || "",
+    };
   }
   if (updateData.coverUrl !== undefined) {
     user.shopProfile.coverUrl = updateData.coverUrl.trim();

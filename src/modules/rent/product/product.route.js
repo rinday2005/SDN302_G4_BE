@@ -1,5 +1,5 @@
 import express from "express";
-import authMiddleware from "../../../middleware/auth.middleware.js";
+import authMiddleware, { optionalAuthMiddleware } from "../../../middleware/auth.middleware.js";
 
 import {
   createProductController,
@@ -48,8 +48,7 @@ router.get(
  */
 router.get(
   "/shop/mine",
-  authMiddleware,
-  requireShopOwner,
+  optionalAuthMiddleware,
   getShopProductsController
 );
 

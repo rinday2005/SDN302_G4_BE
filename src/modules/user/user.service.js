@@ -60,14 +60,19 @@ export const updateProfile = async (userId, data) => {
 
   if (data.address) {
     if (typeof data.address === "object") {
+      const rawDetail = (data.address.detail || "").trim();
+      const rawProvince = (data.address.province || "").trim();
+      const inferredProvince =
+        rawProvince ||
+        (rawDetail.includes(",") ? rawDetail.split(",").pop().trim() : "");
       allowedFields.address = {
-        province: data.address.province || "",
-        district: data.address.district || "",
-        ward: data.address.ward || "",
-        detail: data.address.detail || "",
+        province: inferredProvince || "Thành phố Đà Nẵng",
+        district: (data.address.district || "").trim(),
+        ward: (data.address.ward || "").trim(),
+        detail: rawDetail,
       };
     } else if (typeof data.address === "string" && data.address.trim()) {
-      const parts = data.address.split(",").map((s) => s.trim());
+      const parts = data.address.split(",").map((s) => s.trim()).filter(Boolean);
       if (parts.length >= 4) {
         allowedFields.address = {
           detail: parts[0] || "",
@@ -77,8 +82,8 @@ export const updateProfile = async (userId, data) => {
         };
       } else {
         allowedFields.address = {
-          province: "",
-          district: "",
+          province: parts.length > 0 ? parts[parts.length - 1] : "Thành phố Đà Nẵng",
+          district: parts.length >= 3 ? parts[parts.length - 2] : "",
           ward: "",
           detail: data.address.trim(),
         };

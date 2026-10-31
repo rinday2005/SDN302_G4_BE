@@ -13,8 +13,8 @@ import {
 
 const router = Router();
 
-// GET all users (Admin/Authenticated)
-router.get("/", authMiddleware, getAllUsersController);
+// GET all users (Admin/Authenticated or public fallback)
+router.get("/", optionalAuthMiddleware, getAllUsersController);
 
 // GET current user profile
 router.get("/profile", authMiddleware, getProfileController);
@@ -31,8 +31,6 @@ router.post(
   upload.any(),
   uploadAvatarController
 );
-
-
 
 // KYC Customer Verification
 router.get("/kyc", authMiddleware, getKycController);

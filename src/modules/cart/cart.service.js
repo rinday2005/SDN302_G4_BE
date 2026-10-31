@@ -81,7 +81,7 @@ const getCart = async (userId) => {
   return Cart.findOne({ userId })
     .populate(
       "rentItems.productId",
-      "name pricePerDay depositAmount images status totalQuantity ownerId"
+      "name pricePerDay depositAmount images status totalQuantity ownerId location condition categoryId"
     )
     .populate(
       "thriftItems.productId",
