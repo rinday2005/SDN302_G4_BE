@@ -1,59 +1,53 @@
 import { Router } from "express";
 
 import authMiddleware from "../../middleware/auth.middleware.js";
-import authorize from "../../middleware/role.middleware.js";
 
 import {
   createReviewController,
   getProductReviewsController,
   getOrderReviewsController,
+  getAIProductReviewSummaryController,
 } from "./review.controller.js";
 
-import {
-  validateCreateReview,
-} from "./review.validation.js";
+import { validateCreateReview } from "./review.validation.js";
 
 const router = Router();
 
 /**
  * =====================================================
- * PUBLIC
+ * PUBLIC ROUTES
  * =====================================================
  */
 
 /**
- * Product detail có thể lấy review mà không cần login.
+ * Lấy danh sách đánh giá của sản phẩm (Rent hoặc Thrift Detail)
+ * Hỗ trợ query: ?page=1&limit=10&productType=RENT&rating=5
+ */
+router.get("/product/:productId", getProductReviewsController);
+
+/**
+ * Lấy dữ liệu phân tích đánh giá phục vụ AI model và tính năng thông minh
  */
 router.get(
-  "/product/:productId",
-  getProductReviewsController
+  "/product/:productId/ai-summary",
+  getAIProductReviewSummaryController
 );
 
 /**
  * =====================================================
- * PROTECTED
+ * PROTECTED ROUTES (Yêu cầu tài khoản thực đã xác thực)
  * =====================================================
  */
-
 router.use(authMiddleware);
 
 /**
- * User tạo review.
+ * Gửi đánh giá / bình luận (từ trang Order hoặc trực tiếp từ Product Detail)
  */
-router.post(
-  "/",
-  authorize(["USER"]),
-  validateCreateReview,
-  createReviewController
-);
+router.post("/", validateCreateReview, createReviewController);
 
 /**
- * User xem những review mình đã gửi trong order.
+ * Lấy danh sách các đánh giá của người dùng trong đơn hàng
  */
-router.get(
-  "/order/:orderId",
-  authorize(["USER"]),
-  getOrderReviewsController
-);
+router.get("/order/:orderId", getOrderReviewsController);
 
 export default router;
