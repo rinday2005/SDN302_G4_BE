@@ -426,9 +426,9 @@ const seedThriftListings = async (categories) => {
       ],
     },
     {
-      name: "Giày Cao Gót Nữ Mũi Nhọn Ánh Kim Cao Cấp 9cm",
-      description: "Giày cao gót nữ mũi nhọn màu ánh kim bạc quyến rũ, gót nhọn 9cm tôn dáng thanh mảnh, đệm lót êm ái đi tiệc không đau chân.",
-      categoryId: shoesCat._id,
+      name: "Đầm Dạ Hội Lụa Satin Xẻ Tà Phối Ren Cao Cấp",
+      description: "Đầm dạ hội lụa satin xẻ tà sang trọng màu đen tuyền phối ren Haute Couture Pháp. Phom dáng ôm tôn dáng hoàn mỹ, giữ gìn cẩn thận sau 1 lần diện thảm đỏ.",
+      categoryId: partyDressCat._id,
       ownerId: shopOwner._id,
       price: 1250000,
       condition: "Như mới (99%)",
@@ -437,7 +437,7 @@ const seedThriftListings = async (categories) => {
       location: "Hà Nội",
       quantity: 2,
       images: [
-        "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=800&auto=format&fit=crop&q=80",
+        "https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=800&auto=format&fit=crop&q=80",
       ],
     },
     {
@@ -456,9 +456,9 @@ const seedThriftListings = async (categories) => {
       ],
     },
     {
-      name: "Giày Boots Nữ Da Cổ Lửng Vintage Màu Camel",
-      description: "Boots nữ da thật cổ lửng phong cách vintage, đế vuông 5cm êm chân dễ phối với đầm vintage hoặc chân váy dài mùa thu đông.",
-      categoryId: shoesCat._id,
+      name: "Áo Khoác Trench Coat Dạ Dáng Dài Khuy Đôi Vintage",
+      description: "Áo khoác dáng dài chất liệu dạ ép hai mặt cao cấp phong cách Paris cổ điển, giữ ấm tốt, cầu vai tự nhiên đứng form tôn dáng.",
+      categoryId: clothingCat._id,
       ownerId: shopOwner._id,
       price: 1100000,
       condition: "Rất tốt (97%)",
@@ -467,7 +467,7 @@ const seedThriftListings = async (categories) => {
       location: "Đà Nẵng",
       quantity: 1,
       images: [
-        "https://images.unsplash.com/photo-1542295669297-4d352b042bca?w=800&auto=format&fit=crop&q=80",
+        "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800&auto=format&fit=crop&q=80",
       ],
     },
     {
@@ -486,9 +486,9 @@ const seedThriftListings = async (categories) => {
       ],
     },
     {
-      name: "Giày Sneaker Nữ Cổ Thấp Phối Màu Pastel Năng Động",
-      description: "Sneaker nữ phom dáng ôm chân phối màu pastel ngọt ngào, chất liệu da mềm phối lưới thông thoáng. Đã thanh lý hoàn tất thành công cho khách hàng quen.",
-      categoryId: shoesCat._id,
+      name: "Chân Váy Xếp Ly Dáng Dài Lụa Tơ Tằm Dập Ly Nhỏ",
+      description: "Chân váy xếp ly dáng dài dập ly thủ công tỉ mỉ bằng lụa tơ tằm mềm mại thướt tha, cạp thun co giãn nhẹ nhàng thanh lịch dễ phối đồ.",
+      categoryId: clothingCat._id,
       ownerId: shopOwner._id,
       price: 520000,
       condition: "Đã qua sử dụng (92%)",
@@ -497,7 +497,7 @@ const seedThriftListings = async (categories) => {
       location: "Đà Nẵng",
       quantity: 0,
       images: [
-        "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=800&auto=format&fit=crop&q=80",
+        "https://images.unsplash.com/photo-1583496661160-fb5886a0aaaa?w=800&auto=format&fit=crop&q=80",
       ],
     },
     {
