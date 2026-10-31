@@ -2,9 +2,11 @@ import { Router } from "express";
 
 import authMiddleware from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
+import upload from "../../middleware/upload.middleware.js";
 
 import {
   getPublicCategoriesController,
+  getPublicCategoryBySlugController,
   getAllCategoriesController,
   getCategoryByIdController,
   createCategoryController,
@@ -24,10 +26,16 @@ const adminCategoryRouter = Router();
 /*
  * PUBLIC
  * GET /api/categories
+ * GET /api/categories/:slug
  */
 publicCategoryRouter.get(
   "/",
   getPublicCategoriesController
+);
+
+publicCategoryRouter.get(
+  "/:slug",
+  getPublicCategoryBySlugController
 );
 
 /*
@@ -52,12 +60,14 @@ adminCategoryRouter.get(
 
 adminCategoryRouter.post(
   "/",
+  upload.any(),
   validateCreateCategory,
   createCategoryController
 );
 
 adminCategoryRouter.put(
   "/:id",
+  upload.any(),
   validateUpdateCategory,
   updateCategoryController
 );

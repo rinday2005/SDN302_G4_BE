@@ -19,9 +19,15 @@ router.post('/upload', upload.any(), (req, res, next) => {
       return res.status(400).json({ message: 'Vui lòng cung cấp file ảnh' });
     }
 
+    const rawFolder = req.body?.folder || req.query?.folder;
+    const folder =
+      typeof rawFolder === 'string' && rawFolder.trim()
+        ? rawFolder.trim()
+        : 'reuse_hub';
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        folder: 'reuse_hub',
+        folder,
         resource_type: 'image',
       },
       (error, result) => {
