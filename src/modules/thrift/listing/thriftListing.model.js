@@ -65,6 +65,15 @@ const thriftListingSchema = new mongoose.Schema(
       default: 5,
       min: 0,
     },
+    sizes: {
+      type: [String],
+      default: [],
+    },
+    size: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     rejectionReason: {
       type: String,
       trim: true,
