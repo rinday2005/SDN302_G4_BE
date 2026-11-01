@@ -49,10 +49,15 @@ const sanitizeThriftForClient = (item) => {
       .catch(() => {});
   }
 
+  const rawSizes = Array.isArray(item.sizes) ? item.sizes.filter(Boolean) : [];
+  const activeSize = item.size || (rawSizes.length > 0 ? rawSizes[0] : '');
+
   return {
     ...item,
     location: normalizeShopBranch(item.location),
     images: cleanImages.length > 0 ? cleanImages : [FALLBACK_THRIFT_IMAGE],
+    sizes: rawSizes.length > 0 ? rawSizes : (activeSize ? [activeSize] : []),
+    size: activeSize,
   };
 };
 
@@ -62,12 +67,22 @@ export const createListing = async (userId, data) => {
   if (Array.isArray(safeData.images)) {
     safeData.images = await uploadBase64ThriftImages(safeData.images);
   }
+
+  // Chuẩn hóa sizes và size
+  if (Array.isArray(safeData.sizes)) {
+    safeData.sizes = safeData.sizes.filter(Boolean);
+    if (!safeData.size && safeData.sizes.length > 0) {
+      safeData.size = safeData.sizes[0];
+    }
+  } else if (safeData.size) {
+    safeData.sizes = [safeData.size];
+  }
+
   // AC: ownerId không lấy tự do từ body, gán từ req.user.id
   // AC: status mặc định luôn là PENDING_APPROVAL
   const newListing = await ThriftListing.create({
     ...safeData,
     ownerId: userId,
-
     status: "PENDING_APPROVAL",
   });
   return newListing;
@@ -93,6 +108,14 @@ export const updateListing = async (listingId, userId, updateData) => {
   delete updateData.ownerId;
   if (updateData.location !== undefined) {
     updateData.location = normalizeShopBranch(updateData.location);
+  }
+  if (Array.isArray(updateData.sizes)) {
+    updateData.sizes = updateData.sizes.filter(Boolean);
+    if (!updateData.size && updateData.sizes.length > 0) {
+      updateData.size = updateData.sizes[0];
+    }
+  } else if (updateData.size) {
+    updateData.sizes = [updateData.size];
   }
 
   Object.assign(listing, updateData);
@@ -123,13 +146,14 @@ export const getPublicListings = async (query = {}) => {
 export const getListingById = async (listingId) => {
   const listing = await ThriftListing.findById(listingId)
     .populate("categoryId", "name")
-    .populate("ownerId", "fullName email phoneNumber address");
+    .populate("ownerId", "fullName email phoneNumber address")
+    .lean();
   if (!listing) {
     const error = new Error("Sản phẩm thanh lý không tồn tại");
     error.statusCode = 404;
     throw error;
   }
-  return listing;
+  return sanitizeThriftForClient(listing);
 };
 
 // 5. Chuyển đổi sản phẩm RENT sang THRIFT (Circular Economy API) - [BE-S4-04]
@@ -145,6 +169,8 @@ export const convertFromRental = async (userId, data) => {
     categoryId,
     location,
     name,
+    sizes,
+    size,
   } = data;
 
   if (!rentalProductId) {
@@ -213,14 +239,20 @@ export const convertFromRental = async (userId, data) => {
     ? images
     : rentalProduct.images;
 
+  const resolvedSizes = Array.isArray(sizes) && sizes.length > 0
+    ? sizes
+    : (rentalProduct.sizes || []);
+  const resolvedSize = size || (resolvedSizes.length > 0 ? resolvedSizes[0] : (rentalProduct.size || ''));
+
   const newListing = await ThriftListing.create({
     ownerId: userId,
-
     name: name || rentalProduct.name,
     description: conditionDescription || description || rentalProduct.description || "",
     price: Number(finalSellingPrice),
     condition: condition || rentalProduct.condition || "GOOD",
     images: thriftImages,
+    sizes: resolvedSizes,
+    size: resolvedSize,
     categoryId: categoryId || rentalProduct.categoryId,
     location: normalizeShopBranch(location || rentalProduct.location),
     status: "APPROVED",
