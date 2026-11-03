@@ -1,4 +1,4 @@
-import { getAllUsersController } from "../user/user.controller.js";
+import { getAllUsersController, toggleUserStatusController, respondUserAppealController, getAllAppealsController } from "../user/user.controller.js";
 import { Router } from "express";
 import authMiddleware from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
@@ -29,6 +29,13 @@ adminRouter.use(authMiddleware, authorize(["ADMIN"]));
 
 // Lấy danh sách toàn bộ người dùng (MongoDB)
 adminRouter.get("/users", getAllUsersController);
+adminRouter.patch("/users/:id/status", toggleUserStatusController);
+adminRouter.post("/users/:id/status", toggleUserStatusController);
+adminRouter.post("/users/:id/respond-appeal", respondUserAppealController);
+adminRouter.patch("/users/:id/respond-appeal", respondUserAppealController);
+
+// Lấy danh sách toàn bộ đơn khiếu nại mở khóa tài khoản từ collection 'appeals' (MongoDB)
+adminRouter.get("/appeals", getAllAppealsController);
 
 // ============================================================================
 // 1. KIỂM DUYỆT LISTING TOÀN DIỆN (RENT & THRIFT)

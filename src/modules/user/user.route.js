@@ -9,6 +9,8 @@ import {
   getKycController,
   submitKycController,
   updateKycStatusController,
+  toggleUserStatusController,
+  respondUserAppealController,
 } from "./user.controller.js";
 import { validateUpdateProfile } from "./user.validation.js";
 
@@ -37,5 +39,8 @@ router.post(
 router.get("/kyc", authMiddleware, getKycController);
 router.post("/kyc/submit", authMiddleware, submitKycController);
 router.patch("/kyc/status", authMiddleware, updateKycStatusController);
+router.patch("/:id/status", authMiddleware, toggleUserStatusController);
+router.post("/:id/status", authMiddleware, toggleUserStatusController);
+router.post("/:id/respond-appeal", authMiddleware, respondUserAppealController);
 
 export default router;

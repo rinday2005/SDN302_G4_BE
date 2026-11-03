@@ -1,3 +1,4 @@
+import LockAppeal from "./lockAppeal.model.js";
 import { successResponse } from "../../utils/response.js";
 import {
   getProfile,
@@ -7,6 +8,8 @@ import {
   submitKyc,
   updateKycStatus,
   getAllUsers,
+  toggleUserStatus,
+  respondUserAppeal,
 } from "./user.service.js";
 import User from "./user.model.js";
 import {
@@ -197,6 +200,49 @@ export const getAllUsersController = async (req, res, next) => {
   try {
     const users = await getAllUsers(req.query);
     return successResponse(res, "Lấy danh sách người dùng thành công", users);
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+/**
+ * PATCH /api/users/:id/status or /api/admin/users/:id/status
+ * Admin tạm khóa hoặc mở khóa tài khoản
+ */
+export const toggleUserStatusController = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await toggleUserStatus(id, req.body);
+    const msg = result.isLocked ? "Đã tạm khóa tài khoản thành công" : "Đã mở khóa tài khoản thành công";
+    return successResponse(res, msg, result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/admin/users/:id/respond-appeal
+ * Admin phản hồi khiếu nại, mở khóa tài khoản và gửi email thật cho User
+ */
+export const respondUserAppealController = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await respondUserAppeal(id, req.body);
+    return successResponse(res, "Đã phản hồi khiếu nại, mở khóa tài khoản và gửi email thông báo thành công", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/admin/appeals
+ * Lấy danh sách toàn bộ đơn khiếu nại mở khóa tài khoản từ collection 'appeals'
+ */
+export const getAllAppealsController = async (req, res, next) => {
+  try {
+    const appeals = await LockAppeal.find().sort({ createdAt: -1 });
+    return successResponse(res, "Lấy danh sách đơn khiếu nại từ MongoDB thành công", appeals);
   } catch (error) {
     next(error);
   }

@@ -98,6 +98,33 @@ const userSchema = new mongoose.Schema(
       min: 0,
     },
 
+    status: {
+      type: String,
+      enum: ["ACTIVE", "LOCKED", "SUSPENDED", "lock", "locked", "active"],
+      default: "ACTIVE",
+    },
+
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
+
+    lockReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    lockedAt: {
+      type: Date,
+      default: null,
+    },
+
+    lockAppeal: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
     shopProfile: {
       shopName: {
         type: String,

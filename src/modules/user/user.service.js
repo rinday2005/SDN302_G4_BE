@@ -1,3 +1,5 @@
+import LockAppeal from "./lockAppeal.model.js";
+import { sendAccountUnlockEmail } from "../../utils/email.js";
 import User from "./user.model.js";
 import KycRecord from "../kyc/kyc.model.js";
 
@@ -20,6 +22,11 @@ export const formatUserResponse = (user) => {
     kyc: user.kyc || null,
     address: user.address || null,
     walletBalance: Number(user.walletBalance) || 0,
+    status: user.status || (user.isLocked ? "lock" : "ACTIVE"),
+    isLocked: Boolean(user.isLocked || user.status === "lock" || user.status === "locked" || user.status === "LOCKED" || user.status === "SUSPENDED"),
+    lockReason: user.lockReason || null,
+    lockedAt: user.lockedAt || null,
+    lockAppeal: (user.lockAppeal && (user.lockAppeal.question || user.lockAppeal.submittedAt)) ? user.lockAppeal : null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -274,6 +281,110 @@ export const updateKycStatus = async (userId, data) => {
  * Get all users (Admin)
  */
 export const getAllUsers = async (query = {}) => {
-  const users = await User.find().select("-passwordHash").sort({ createdAt: -1 });
+  const users = await User.find().select("-passwordHash").lean();
+  users.sort((a, b) => {
+    const aPending = Boolean(a.lockAppeal && a.lockAppeal.status === "PENDING" && (a.lockAppeal.question || a.lockAppeal.submittedAt));
+    const bPending = Boolean(b.lockAppeal && b.lockAppeal.status === "PENDING" && (b.lockAppeal.question || b.lockAppeal.submittedAt));
+    if (aPending && !bPending) return -1;
+    if (!aPending && bPending) return 1;
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  });
   return users.map(formatUserResponse);
+};
+
+
+/**
+ * Admin tạm khóa hoặc mở khóa tài khoản người dùng và lưu vào MongoDB
+ */
+export const toggleUserStatus = async (userId, { status, isLocked, lockReason }) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    error.errorCode = "USER_NOT_FOUND";
+    throw error;
+  }
+
+  const lockInput = String(status || "").toLowerCase();
+  const shouldLock =
+    isLocked === true ||
+    lockInput === "lock" ||
+    lockInput === "locked" ||
+    lockInput === "suspended" ||
+    (status === undefined && isLocked === undefined && !user.isLocked && (user.status === "ACTIVE" || user.status === "active"));
+
+  if (shouldLock) {
+    user.status = "lock";
+    user.isLocked = true;
+    user.lockReason = String(lockReason || "Tài khoản bị tạm khóa bởi Quản trị viên để kiểm tra rà soát an toàn").trim();
+    user.lockedAt = new Date();
+    user.lockAppeal = null;
+  } else {
+    user.status = "ACTIVE";
+    user.isLocked = false;
+    user.lockReason = "";
+  }
+
+  await user.save();
+  return formatUserResponse(user);
+};
+
+/**
+ * Admin phản hồi khiếu nại của User, mở khóa tài khoản và gửi Gmail thông báo thật
+ */
+export const respondUserAppeal = async (userId, { unlock = true, lockReason = "", adminReply = "" }) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    error.errorCode = "USER_NOT_FOUND";
+    throw error;
+  }
+
+  const effectiveReason = lockReason || user.lockReason || "Tài khoản bị tạm khóa để kiểm tra bảo mật";
+
+  if (unlock) {
+    user.status = "ACTIVE";
+    user.isLocked = false;
+  }
+
+  const replyMsg = adminReply || "Đội ngũ Quản trị viên đã xem xét giải trình và xác thực thông tin tài khoản hợp lệ. Tài khoản đã được phục hồi toàn bộ quyền truy cập.";
+  const resolvedDate = new Date();
+
+  // Cập nhật đơn trong collection 'appeals'
+  await LockAppeal.updateMany(
+    { userId: user._id, status: "PENDING" },
+    {
+      $set: {
+        status: unlock ? "RESOLVED" : "REJECTED",
+        adminReply: replyMsg,
+        resolvedAt: resolvedDate,
+      },
+    }
+  );
+
+  // Cập nhật trường lockAppeal trên user
+  if (!user.lockAppeal) {
+    user.lockAppeal = {};
+  }
+  user.lockAppeal.status = unlock ? "RESOLVED" : "REJECTED";
+  user.lockAppeal.adminReply = replyMsg;
+  user.lockAppeal.resolvedAt = resolvedDate;
+  user.markModified("lockAppeal");
+
+  await user.save();
+
+  // Gửi Gmail thật thông báo cho User
+  const emailResult = await sendAccountUnlockEmail({
+    to: user.email,
+    fullName: user.fullName,
+    lockReason: effectiveReason,
+    adminReply: user.lockAppeal.adminReply,
+  });
+
+  return {
+    user: formatUserResponse(user),
+    emailSent: emailResult.success,
+    emailDetails: emailResult,
+  };
 };
