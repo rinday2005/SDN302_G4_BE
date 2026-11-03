@@ -10,6 +10,7 @@ import {
   cancelThriftOrder,
   updateThriftOrderStatus,
   confirmDeliveredThriftOrder,
+  disputeThriftOrder,
 } from "./thriftOrder.controller.js";
 import {
   validateCheckoutThriftOrder,
@@ -39,10 +40,13 @@ router.get("/:id", getThriftOrderById);
 // [BE-S4-05] Khóa Sản phẩm Đã bán (Atomic Lock) & Xác nhận thanh toán thành công
 router.post("/:id/pay", lockAndMarkOrderPaid);
 
-// Hủy đơn hàng
 // Khách xác nhận đã nhận hàng (Buyer confirms delivery)
 router.post("/:id/confirm-delivered", confirmDeliveredThriftOrder);
 
+// Mở khiếu nại tranh chấp đơn hàng THRIFT (Buyer / Seller / Admin)
+router.post("/:id/dispute", disputeThriftOrder);
+
+// Hủy đơn hàng
 router.post("/:id/cancel", cancelThriftOrder);
 
 // Cập nhật trạng thái xử lý/vận chuyển đơn hàng (Shop Owner / Admin)
