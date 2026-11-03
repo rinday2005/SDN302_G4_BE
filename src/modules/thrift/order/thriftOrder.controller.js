@@ -119,3 +119,14 @@ export const confirmDeliveredThriftOrder = async (req, res, next) => {
     next(error);
   }
 };
+
+
+export const disputeThriftOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const order = await thriftOrderService.disputeThriftOrder(id, req.user, req.body);
+    return successResponse(res, "Mở khiếu nại tranh chấp đơn hàng THRIFT thành công", order, 200);
+  } catch (error) {
+    next(error);
+  }
+};

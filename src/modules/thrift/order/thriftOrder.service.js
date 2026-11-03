@@ -549,3 +549,46 @@ export const confirmDeliveredThriftOrder = async (orderId, user) => {
   await order.save();
   return order;
 };
+
+
+/**
+ * Người mua (Buyer), Người bán (Seller) hoặc Admin mở khiếu nại tranh chấp đơn hàng THRIFT
+ */
+export const disputeThriftOrder = async (orderId, user, { reason = "", problemItem = "all", description = "" } = {}) => {
+  let order = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await ThriftOrder.findById(orderId);
+  }
+  if (!order) {
+    const cleanCode = String(orderId).trim().replace(/^#/, "");
+    order = await ThriftOrder.findOne({
+      $or: [{ orderCode: orderId }, { orderCode: `#${orderId}` }, { orderCode: cleanCode }],
+    });
+  }
+
+  if (!order) {
+    throw createError("Đơn hàng thanh lý không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+
+  const isBuyer = order.buyerId?.toString() === user._id.toString();
+  const isSeller = order.items?.some(
+    (item) => (item.sellerId || item.ownerId)?.toString() === user._id.toString()
+  );
+  const isAdmin = user.role === "ADMIN";
+
+  if (!isBuyer && !isSeller && !isAdmin) {
+    throw createError("Bạn không có quyền khiếu nại đơn hàng này", 403, "FORBIDDEN");
+  }
+
+  order.status = THRIFT_ORDER_STATUS.DISPUTED;
+  order.disputeReason = reason || description || "Khách hàng yêu cầu đối soát độc lập trong 72h";
+  order.disputeDetail = {
+    problemItem: problemItem || "all",
+    reason: reason || "",
+    description: description || "",
+    disputedAt: new Date(),
+    reportedBy: user._id,
+  };
+  await order.save();
+  return order;
+};

@@ -235,11 +235,12 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
 };
 
 // ============================================================================
+// ============================================================================
 // 2. DISPUTE MANAGEMENT (RENTAL ORDER & THRIFT DISPUTES)
 // ============================================================================
 
 /**
- * Lấy danh sách tranh chấp đơn hàng (mặc định tập trung vào RentalOrder disputes)
+ * Lấy danh sách tranh chấp đơn hàng (mặc định tập trung vào RentalOrder disputes & Thrift disputes)
  */
 export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) => {
   const numericPage = Math.max(1, Number(page) || 1);
@@ -255,11 +256,20 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
     ],
   };
 
+  const thriftDisputeFilter = {
+    $or: [
+      { status: "DISPUTED" },
+      { disputeStatus: "RESOLVED" },
+    ],
+  };
+
   if (status) {
     if (status === "OPEN") {
       rentDisputeFilter.$or = [{ status: "DISPUTED" }, { "dispute.status": "OPEN" }];
+      thriftDisputeFilter.$or = [{ status: "DISPUTED" }];
     } else if (status === "RESOLVED") {
       rentDisputeFilter.$or = [{ "dispute.status": "RESOLVED" }];
+      thriftDisputeFilter.$or = [{ disputeStatus: "RESOLVED" }];
     }
   }
 
@@ -272,11 +282,11 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
       .skip(skip)
       .limit(numericLimit),
     RentalOrder.countDocuments(rentDisputeFilter),
-    ThriftOrder.find({ status: "DISPUTED" })
+    ThriftOrder.find(thriftDisputeFilter)
       .populate("buyerId", "fullName email phoneNumber")
       .populate("items.sellerId", "fullName email phoneNumber")
       .sort({ updatedAt: -1 }),
-    ThriftOrder.countDocuments({ status: "DISPUTED" }),
+    ThriftOrder.countDocuments(thriftDisputeFilter),
   ]);
 
   // Chuẩn hóa dữ liệu tranh chấp trả về cho Admin
@@ -292,7 +302,7 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
       totalAmount: order.totalAmount,
       depositAmount: order.depositAmount,
       rentalFee: order.rentalFee,
-      escrowLocked: order.depositAmount,
+      escrowLocked: isResolved ? 0 : (order.depositAmount || 0),
       orderStatus: order.status,
       disputeStatus: isResolved ? "RESOLVED" : "OPEN",
       statusText: isResolved ? "Đã giải quyết" : "Đang chờ đối soát Admin",
@@ -311,26 +321,33 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
     };
   });
 
-  const formattedThriftDisputes = thriftDisputes.map((order) => ({
-    id: order._id,
-    orderCode: order.orderCode || `#THRIFT-${String(order._id).slice(-6).toUpperCase()}`,
-    orderType: "THRIFT",
-    renter: order.buyerId,
-    shopOwner: order.items?.[0]?.sellerId || null,
-    items: order.items,
-    totalAmount: order.totalAmount,
-    depositAmount: 0,
-    rentalFee: order.totalAmount,
-    escrowLocked: order.totalAmount,
-    orderStatus: order.status,
-    disputeStatus: "OPEN",
-    statusText: "Yêu cầu đối soát 72h",
-    reason: order.disputeReason || "Khách hàng yêu cầu đối soát độc lập trong 72h",
-    damageImages: [],
-    reportedAt: order.updatedAt,
-    inspectionResult: null,
-    resolution: null,
-  }));
+  const formattedThriftDisputes = thriftDisputes.map((order) => {
+    const isResolved = order.disputeStatus === "RESOLVED" || (order.status === "COMPLETED" && Boolean(order.resolution));
+    return {
+      id: order._id,
+      orderCode: order.orderCode || `#THRIFT-${String(order._id).slice(-6).toUpperCase()}`,
+      orderType: "THRIFT",
+      renter: order.buyerId,
+      shopOwner: order.items?.[0]?.sellerId || null,
+      items: order.items,
+      totalAmount: order.totalAmount,
+      depositAmount: 0,
+      rentalFee: order.totalAmount,
+      escrowLocked: isResolved ? 0 : (order.totalAmount || 0),
+      orderStatus: order.status,
+      disputeStatus: isResolved ? "RESOLVED" : "OPEN",
+      statusText: isResolved ? "Đã giải quyết" : "Yêu cầu đối soát 72h",
+      reason:
+        order.disputeReason ||
+        order.disputeDetail?.reason ||
+        order.disputeDetail?.description ||
+        "Khách hàng yêu cầu đối soát độc lập trong 72h",
+      damageImages: [],
+      reportedAt: order.disputeDetail?.disputedAt || order.updatedAt,
+      inspectionResult: null,
+      resolution: order.resolution || null,
+    };
+  });
 
   const allDisputes = [...formattedRentDisputes, ...formattedThriftDisputes];
   const openCount = allDisputes.filter((d) => d.disputeStatus === "OPEN").length;
@@ -341,7 +358,7 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
 
   return {
     disputes: allDisputes,
-    total: rentTotal + thriftTotal,
+    total: allDisputes.length,
     metrics: {
       openCount,
       resolvedCount,
@@ -355,32 +372,63 @@ export const getDisputesService = async ({ status, page = 1, limit = 20 } = {}) 
 };
 
 /**
- * Xem chi tiết tranh chấp của 1 đơn thuê
+ * Xem chi tiết tranh chấp của 1 đơn thuê hoặc đơn mua thanh lý
  */
 export const getDisputeByIdService = async (orderId) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ID");
+  let order = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await RentalOrder.findById(orderId)
+      .populate("renterId", "fullName email phoneNumber avatarUrl address")
+      .populate("shopOwnerId", "fullName email phoneNumber address")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location");
+  }
+  if (!order) {
+    const clean = String(orderId).trim().replace("#", "").replace("RH-", "").replace("RO-", "");
+    order = await RentalOrder.findOne({
+      $or: [
+        { orderCode: orderId },
+        { orderCode: `#${orderId}` },
+        { orderCode: `RO-${clean}` },
+        { orderCode: `#RO-${clean}` },
+        { orderCode: clean },
+      ],
+    })
+      .populate("renterId", "fullName email phoneNumber avatarUrl address")
+      .populate("shopOwnerId", "fullName email phoneNumber address")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location");
   }
 
-  const order = await RentalOrder.findById(orderId)
-    .populate("renterId", "fullName email phoneNumber avatarUrl address")
-    .populate("shopOwnerId", "fullName email phoneNumber address")
-    .populate("items.productId", "name images pricePerDay depositAmount condition location");
+  if (order) {
+    return { orderType: "RENT", order };
+  }
 
-  if (!order) {
-    // Check if it is a ThriftOrder
-    const thriftOrder = await ThriftOrder.findById(orderId)
+  // Check if it is a ThriftOrder
+  let thriftOrder = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    thriftOrder = await ThriftOrder.findById(orderId)
       .populate("buyerId", "fullName email phoneNumber")
       .populate("items.sellerId", "fullName email phoneNumber");
-
-    if (thriftOrder) {
-      return { orderType: "THRIFT", order: thriftOrder };
-    }
-
-    throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
+  }
+  if (!thriftOrder) {
+    const clean = String(orderId).trim().replace("#", "").replace("THRIFT-", "").replace("TO-", "");
+    thriftOrder = await ThriftOrder.findOne({
+      $or: [
+        { orderCode: orderId },
+        { orderCode: `#${orderId}` },
+        { orderCode: `TO-${clean}` },
+        { orderCode: `#TO-${clean}` },
+        { orderCode: clean },
+      ],
+    })
+      .populate("buyerId", "fullName email phoneNumber")
+      .populate("items.sellerId", "fullName email phoneNumber");
   }
 
-  return { orderType: "RENT", order };
+  if (thriftOrder) {
+    return { orderType: "THRIFT", order: thriftOrder };
+  }
+
+  throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
 };
 
 /**
@@ -398,107 +446,203 @@ export const resolveDisputeService = async (
   },
   adminUser
 ) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ID");
+  let order = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await RentalOrder.findById(orderId);
   }
-
-  const order = await RentalOrder.findById(orderId);
   if (!order) {
-    throw createError("Đơn hàng thuê không tồn tại", 404, "ORDER_NOT_FOUND");
+    const clean = String(orderId).trim().replace("#", "").replace("RH-", "").replace("RO-", "");
+    order = await RentalOrder.findOne({
+      $or: [
+        { orderCode: orderId },
+        { orderCode: `#${orderId}` },
+        { orderCode: `RO-${clean}` },
+        { orderCode: `#RO-${clean}` },
+        { orderCode: clean },
+      ],
+    });
   }
 
-  const deposit = Number(order.depositAmount) || 0;
+  if (order) {
+    const deposit = Number(order.depositAmount) || 0;
 
-  // Hỗ trợ phân bổ theo tỷ lệ % nếu được truyền vào
-  let refundAmt = Math.max(0, Number(refundToRenter) || 0);
-  let payoutAmt = Math.max(0, Number(payoutToShop) || 0);
+    // Hỗ trợ phân bổ theo tỷ lệ % nếu được truyền vào
+    let refundAmt = Math.max(0, Number(refundToRenter) || 0);
+    let payoutAmt = Math.max(0, Number(payoutToShop) || 0);
 
-  if (refundPercent !== undefined && refundPercent !== null) {
-    refundAmt = Math.round((Math.max(0, Math.min(100, Number(refundPercent))) / 100) * deposit);
-  }
-  if (payoutPercent !== undefined && payoutPercent !== null) {
-    payoutAmt = Math.round((Math.max(0, Math.min(100, Number(payoutPercent))) / 100) * deposit);
-  }
-
-  // AC: Tổng tiền giải quyết không được vượt quá số tiền cọc đang bị giữ
-  if (refundAmt + payoutAmt > deposit && deposit > 0) {
-    throw createError(
-      `Tổng tiền hoàn trả (${refundAmt}) và bồi thường (${payoutAmt}) không được vượt quá tiền cọc của đơn (${deposit})`,
-      400,
-      "DISPUTE_AMOUNT_EXCEEDS_DEPOSIT"
-    );
-  }
-
-  // Cập nhật thông tin phân xử của Admin
-  if (!order.dispute) {
-    order.dispute = {};
-  }
-
-  order.dispute.status = "RESOLVED";
-  order.dispute.resolution = resolution || "Admin phán quyết phân bổ tiền cọc";
-  order.dispute.refundToRenter = refundAmt;
-  order.dispute.payoutToShop = payoutAmt;
-  order.dispute.adminNotes = String(adminNotes || "").trim();
-  order.dispute.resolvedAt = new Date();
-  order.dispute.resolvedBy = adminUser._id;
-
-  // AC: Cập nhật trạng thái đơn sang COMPLETED
-  order.status = RENTAL_ORDER_STATUS.COMPLETED;
-
-  await order.save();
-
-  // AC: Phán quyết tranh chấp tự động kích hoạt cập nhật trạng thái đơn hàng và ví nội bộ
-  let renterWalletBalance = null;
-  let shopWalletBalance = null;
-
-  if (order.renterId && refundAmt > 0) {
-    const renter = await User.findById(order.renterId);
-    if (renter) {
-      renter.walletBalance = (Number(renter.walletBalance) || 0) + refundAmt;
-      await renter.save();
-      renterWalletBalance = renter.walletBalance;
+    if (refundPercent !== undefined && refundPercent !== null) {
+      refundAmt = Math.round((Math.max(0, Math.min(100, Number(refundPercent))) / 100) * deposit);
     }
-  }
-
-  if (order.shopOwnerId && payoutAmt > 0) {
-    const shopOwner = await User.findById(order.shopOwnerId);
-    if (shopOwner) {
-      shopOwner.walletBalance = (Number(shopOwner.walletBalance) || 0) + payoutAmt;
-      await shopOwner.save();
-      shopWalletBalance = shopOwner.walletBalance;
+    if (payoutPercent !== undefined && payoutPercent !== null) {
+      payoutAmt = Math.round((Math.max(0, Math.min(100, Number(payoutPercent))) / 100) * deposit);
     }
+
+    // AC: Tổng tiền giải quyết không được vượt quá số tiền cọc đang bị giữ (nếu có cọc)
+    if (refundAmt + payoutAmt > deposit && deposit > 0) {
+      throw createError(
+        `Tổng tiền hoàn trả (${refundAmt}) và bồi thường (${payoutAmt}) không được vượt quá tiền cọc của đơn (${deposit})`,
+        400,
+        "DISPUTE_AMOUNT_EXCEEDS_DEPOSIT"
+      );
+    }
+
+    // Cập nhật thông tin phân xử của Admin
+    if (!order.dispute) {
+      order.dispute = {};
+    }
+
+    order.dispute.status = "RESOLVED";
+    order.dispute.resolution = resolution || "Admin phán quyết phân bổ tiền cọc";
+    order.dispute.refundToRenter = refundAmt;
+    order.dispute.payoutToShop = payoutAmt;
+    order.dispute.adminNotes = String(adminNotes || "").trim();
+    order.dispute.resolvedAt = new Date();
+    order.dispute.resolvedBy = adminUser?._id;
+
+    // AC: Cập nhật trạng thái đơn sang COMPLETED
+    order.status = RENTAL_ORDER_STATUS.COMPLETED;
+
+    await order.save();
+
+    // AC: Phán quyết tranh chấp tự động kích hoạt cập nhật trạng thái đơn hàng và ví nội bộ
+    let renterWalletBalance = null;
+    let shopWalletBalance = null;
+
+    if (order.renterId && refundAmt > 0) {
+      const renter = await User.findById(order.renterId);
+      if (renter) {
+        renter.walletBalance = (Number(renter.walletBalance) || 0) + refundAmt;
+        await renter.save();
+        renterWalletBalance = renter.walletBalance;
+      }
+    }
+
+    if (order.shopOwnerId && payoutAmt > 0) {
+      const shopOwner = await User.findById(order.shopOwnerId);
+      if (shopOwner) {
+        shopOwner.walletBalance = (Number(shopOwner.walletBalance) || 0) + payoutAmt;
+        await shopOwner.save();
+        shopWalletBalance = shopOwner.walletBalance;
+      }
+    }
+
+    return {
+      orderId: order._id,
+      orderCode: order.orderCode,
+      orderType: "RENT",
+      status: order.status,
+      dispute: order.dispute,
+      walletUpdates: {
+        renterRefund: refundAmt,
+        renterWalletBalance,
+        shopPayout: payoutAmt,
+        shopWalletBalance,
+      },
+    };
   }
 
-  return {
-    orderId: order._id,
-    orderCode: order.orderCode,
-    status: order.status,
-    dispute: order.dispute,
-    walletUpdates: {
-      renterRefund: refundAmt,
-      renterWalletBalance,
-      shopPayout: payoutAmt,
-      shopWalletBalance,
-    },
-  };
+  // Nếu không phải RentalOrder, kiểm tra ThriftOrder
+  let thriftOrder = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    thriftOrder = await ThriftOrder.findById(orderId);
+  }
+  if (!thriftOrder) {
+    const clean = String(orderId).trim().replace("#", "").replace("THRIFT-", "").replace("TO-", "");
+    thriftOrder = await ThriftOrder.findOne({
+      $or: [
+        { orderCode: orderId },
+        { orderCode: `#${orderId}` },
+        { orderCode: `TO-${clean}` },
+        { orderCode: `#TO-${clean}` },
+        { orderCode: clean },
+      ],
+    });
+  }
+
+  if (thriftOrder) {
+    const totalOrderAmount = Number(thriftOrder.totalAmount) || 0;
+    let refundAmt = Math.max(0, Number(refundToRenter) || 0);
+    let payoutAmt = Math.max(0, Number(payoutToShop) || 0);
+
+    if (refundPercent !== undefined && refundPercent !== null) {
+      refundAmt = Math.round((Math.max(0, Math.min(100, Number(refundPercent))) / 100) * totalOrderAmount);
+    }
+    if (payoutPercent !== undefined && payoutPercent !== null) {
+      payoutAmt = Math.round((Math.max(0, Math.min(100, Number(payoutPercent))) / 100) * totalOrderAmount);
+    }
+
+    thriftOrder.status = "COMPLETED";
+    thriftOrder.disputeStatus = "RESOLVED";
+    thriftOrder.resolution = resolution || "Admin giải quyết đối soát tranh chấp Thrift";
+    await thriftOrder.save();
+
+    let buyerWallet = null;
+    let sellerWallet = null;
+
+    if (thriftOrder.buyerId && refundAmt > 0) {
+      const buyer = await User.findById(thriftOrder.buyerId);
+      if (buyer) {
+        buyer.walletBalance = (Number(buyer.walletBalance) || 0) + refundAmt;
+        await buyer.save();
+        buyerWallet = buyer.walletBalance;
+      }
+    }
+
+    const sellerId = thriftOrder.items?.[0]?.sellerId;
+    if (sellerId && payoutAmt > 0) {
+      const seller = await User.findById(sellerId);
+      if (seller) {
+        seller.walletBalance = (Number(seller.walletBalance) || 0) + payoutAmt;
+        await seller.save();
+        sellerWallet = seller.walletBalance;
+      }
+    }
+
+    return {
+      orderId: thriftOrder._id,
+      orderCode: thriftOrder.orderCode,
+      orderType: "THRIFT",
+      status: thriftOrder.status,
+      walletUpdates: {
+        renterRefund: refundAmt,
+        renterWalletBalance: buyerWallet,
+        shopPayout: payoutAmt,
+        shopWalletBalance: sellerWallet,
+      },
+    };
+  }
+
+  throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
 };
 
 /**
  * Renter hoặc Shop Owner khởi tạo tranh chấp trên RentalOrder
  */
 export const createRentalOrderDisputeService = async (orderId, user, { reason = "", damageImages = [] }) => {
-  if (!mongoose.Types.ObjectId.isValid(orderId)) {
-    throw createError("ID đơn hàng không hợp lệ", 400, "INVALID_ID");
+  let order = null;
+  if (mongoose.Types.ObjectId.isValid(orderId)) {
+    order = await RentalOrder.findById(orderId);
+  }
+  if (!order) {
+    const clean = String(orderId).trim().replace("#", "").replace("RH-", "").replace("RO-", "");
+    order = await RentalOrder.findOne({
+      $or: [
+        { orderCode: orderId },
+        { orderCode: `#${orderId}` },
+        { orderCode: `RO-${clean}` },
+        { orderCode: `#RO-${clean}` },
+        { orderCode: clean },
+      ],
+    });
   }
 
-  const order = await RentalOrder.findById(orderId);
   if (!order) {
     throw createError("Đơn hàng không tồn tại", 404, "ORDER_NOT_FOUND");
   }
 
   // Chỉ chính chủ Renter, Shop Owner của đơn hoặc Admin mới được tạo dispute
-  const isRenter = order.renterId.toString() === user._id.toString();
-  const isShopOwner = order.shopOwnerId.toString() === user._id.toString();
+  const isRenter = order.renterId?.toString() === user._id.toString();
+  const isShopOwner = order.shopOwnerId?.toString() === user._id.toString();
   const isAdmin = user.role === "ADMIN";
 
   if (!isRenter && !isShopOwner && !isAdmin) {
@@ -518,7 +662,6 @@ export const createRentalOrderDisputeService = async (orderId, user, { reason = 
   return order;
 };
 
-// ============================================================================
 // 3. FINANCIAL REPORTING (HỆ THỐNG & SHOP OWNER DUY NHẤT)
 // ============================================================================
 
