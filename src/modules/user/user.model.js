@@ -98,11 +98,38 @@ const userSchema = new mongoose.Schema(
       min: 0,
     },
 
+    status: {
+      type: String,
+      enum: ["ACTIVE", "LOCKED", "SUSPENDED", "lock", "locked", "active"],
+      default: "ACTIVE",
+    },
+
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
+
+    lockReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    lockedAt: {
+      type: Date,
+      default: null,
+    },
+
+    lockAppeal: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
     shopProfile: {
       shopName: {
         type: String,
         trim: true,
-        default: "Atelier Chronos & Optics Ltd.",
+        default: "",
       },
       description: {
         type: String,
@@ -139,6 +166,36 @@ const userSchema = new mongoose.Schema(
         trim: true,
         default: "",
       },
+      slogan: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      hotline: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      operatingHours: {
+        type: String,
+        trim: true,
+        default: "08:00 - 20:00 (Thứ 2 - Chủ Nhật)",
+      },
+      website: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      returnPolicy: {
+        type: String,
+        trim: true,
+        default: "Đồng kiểm khi nhận hàng, hoàn cọc trong 24h sau khi hoàn tất kiểm định thiết bị.",
+      },
+      shippingCommitment: {
+        type: String,
+        trim: true,
+        default: "Đóng gói bưu tá chuyên dụng Nanuk chống sốc và niêm phong chì bảo mật.",
+      },
       rating: {
         type: Number,
         default: 5.0,
@@ -155,14 +212,7 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Ensure only one user can have the role SHOP_OWNER in the database
-userSchema.index(
-  { role: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { role: "SHOP_OWNER" },
-  }
-);
+// Multiple SHOP_OWNER accounts are supported in multi-vendor marketplace model
 
 const User = mongoose.model("User", userSchema);
 

@@ -5,6 +5,7 @@ import {
   loginController,
   logoutController,
   getShopOwnerStatusController,
+  appealAccountLockController,
 } from "./auth.controller.js";
 import { validateRegister, validateLogin } from "./auth.validation.js";
 import authMiddleware from "../../middleware/auth.middleware.js";
@@ -17,6 +18,9 @@ router.post("/register", validateRegister, registerController);
 
 // POST /api/auth/login — validate body trước khi xác thực
 router.post("/login", validateLogin, loginController);
+
+// POST /api/auth/appeal-lock — gửi yêu cầu xem xét mở khóa tài khoản
+router.post("/appeal-lock", appealAccountLockController);
 
 // POST /api/auth/logout — stateless logout (xoá token phía client)
 router.post("/logout", logoutController);

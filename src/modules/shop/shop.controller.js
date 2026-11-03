@@ -63,3 +63,13 @@ export const getShopRevenueController = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getPublicShopController = async (req, res, next) => {
+  try {
+    const shopId = req.params.shopId || req.query.shopId;
+    const profile = await getShopProfileService(shopId);
+    return successResponse(res, "Lấy thông tin Shop thành công", profile);
+  } catch (err) {
+    next(err);
+  }
+};

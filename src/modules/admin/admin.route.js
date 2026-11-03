@@ -1,5 +1,6 @@
-import { getAllUsersController } from "../user/user.controller.js";
+import { getAllUsersController, toggleUserStatusController, respondUserAppealController, getAllAppealsController } from "../user/user.controller.js";
 import { Router } from "express";
+import { getAllShopsAdminController, getShopDetailAdminController, reviewShopKycAdminController } from "./admin.controller.js";
 import authMiddleware from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
 import {
@@ -29,6 +30,13 @@ adminRouter.use(authMiddleware, authorize(["ADMIN"]));
 
 // Lấy danh sách toàn bộ người dùng (MongoDB)
 adminRouter.get("/users", getAllUsersController);
+adminRouter.patch("/users/:id/status", toggleUserStatusController);
+adminRouter.post("/users/:id/status", toggleUserStatusController);
+adminRouter.post("/users/:id/respond-appeal", respondUserAppealController);
+adminRouter.patch("/users/:id/respond-appeal", respondUserAppealController);
+
+// Lấy danh sách toàn bộ đơn khiếu nại mở khóa tài khoản từ collection 'appeals' (MongoDB)
+adminRouter.get("/appeals", getAllAppealsController);
 
 // ============================================================================
 // 1. KIỂM DUYỆT LISTING TOÀN DIỆN (RENT & THRIFT)
@@ -79,3 +87,11 @@ adminRouter.post("/platform-fee", updatePlatformFeeController);
 adminRouter.post("/fees", updatePlatformFeeController);
 
 export default adminRouter;
+
+// ============================================================================
+// QUẢN LÝ SHOP OWNER (ADMIN)
+// ============================================================================
+adminRouter.get("/shops", getAllShopsAdminController);
+adminRouter.get("/shops/:id", getShopDetailAdminController);
+adminRouter.patch("/shops/:id/kyc", reviewShopKycAdminController);
+adminRouter.post("/shops/:id/kyc", reviewShopKycAdminController);

@@ -46,10 +46,25 @@ export const getShopProfileService = async (userId) => {
     description: shopProfile.description || "",
     specialization: shopProfile.specialization || "",
     roleTitle: shopProfile.roleTitle || "Master Curator & Archival Custodian",
+    addressObject: user.address
+      ? {
+          province: user.address.province || "",
+          district: user.address.district || "",
+          ward: user.address.ward || "",
+          detail: user.address.detail || "",
+        }
+      : null,
+    slogan: shopProfile.slogan || "",
+    hotline: shopProfile.hotline || user.phoneNumber || "",
+    operatingHours: shopProfile.operatingHours || "08:00 - 20:00 (Thứ 2 - Chủ Nhật)",
+    website: shopProfile.website || "",
+    returnPolicy: shopProfile.returnPolicy || "Đồng kiểm khi nhận hàng, hoàn cọc trong 24h sau khi hoàn tất kiểm định thiết bị.",
+    shippingCommitment: shopProfile.shippingCommitment || "Đóng gói bưu tá chuyên dụng Nanuk chống sốc và niêm phong chì bảo mật.",
     rating: shopProfile.rating ?? 5.0,
     establishedYear: shopProfile.establishedYear || 2024,
     walletBalance: user.walletBalance || 0,
-    kycStatus: user.kycStatus || "APPROVED",
+    kycStatus: user.kycStatus || "NOT_SUBMITTED",
+    kyc: user.kyc || null,
     role: user.role,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -136,23 +151,53 @@ export const updateShopProfileService = async (userId, updateData) => {
   if (updateData.secondaryEmail !== undefined) {
     user.shopProfile.secondaryEmail = updateData.secondaryEmail.trim();
   }
-  if (updateData.businessAddress !== undefined) {
-    user.shopProfile.businessAddress = updateData.businessAddress.trim();
-  } else if (updateData.address !== undefined) {
+  if (updateData.address && typeof updateData.address === "object") {
+    const { province, district, ward, detail } = updateData.address;
+    user.address = {
+      province: (province || "").trim(),
+      district: (district || "").trim(),
+      ward: (ward || "").trim(),
+      detail: (detail || "").trim(),
+    };
+    user.shopProfile.cityRegion = (province || "").trim();
+    user.shopProfile.businessAddress = [detail, ward, district, province].filter(Boolean).join(", ");
+  } else if (typeof updateData.address === "string" && updateData.address.trim()) {
     user.shopProfile.businessAddress = updateData.address.trim();
+    if (!user.address) user.address = {};
+    user.address.detail = updateData.address.trim();
+  } else if (updateData.businessAddress !== undefined) {
+    user.shopProfile.businessAddress = updateData.businessAddress.trim();
   } else if (updateData.addressLine !== undefined) {
     user.shopProfile.businessAddress = updateData.addressLine.trim();
   }
   if (updateData.cityRegion !== undefined) {
     user.shopProfile.cityRegion = updateData.cityRegion.trim();
-    user.address = {
-      ...(user.address?.toObject ? user.address.toObject() : user.address || {}),
-      province: updateData.cityRegion.split(",")[0].trim() || "Đà Nẵng",
-      detail: user.shopProfile.businessAddress || user.address?.detail || "",
-    };
+    if (!user.address) user.address = {};
+    user.address.province = updateData.cityRegion.split(",")[0].trim() || "Đà Nẵng";
   }
   if (updateData.coverUrl !== undefined) {
     user.shopProfile.coverUrl = updateData.coverUrl.trim();
+  }
+  if (updateData.slogan !== undefined) {
+    user.shopProfile.slogan = updateData.slogan.trim();
+  }
+  if (updateData.hotline !== undefined) {
+    user.shopProfile.hotline = updateData.hotline.trim();
+  }
+  if (updateData.operatingHours !== undefined) {
+    user.shopProfile.operatingHours = updateData.operatingHours.trim();
+  }
+  if (updateData.website !== undefined) {
+    user.shopProfile.website = updateData.website.trim();
+  }
+  if (updateData.returnPolicy !== undefined) {
+    user.shopProfile.returnPolicy = updateData.returnPolicy.trim();
+  }
+  if (updateData.shippingCommitment !== undefined) {
+    user.shopProfile.shippingCommitment = updateData.shippingCommitment.trim();
+  }
+  if (updateData.establishedYear !== undefined && !isNaN(Number(updateData.establishedYear))) {
+    user.shopProfile.establishedYear = Number(updateData.establishedYear);
   }
 
   await user.save();
@@ -454,4 +499,8 @@ export const getShopRevenueService = async (userId, queryFilters = {}) => {
     },
     recentTransactions: transactions.slice(0, 15),
   };
+};
+
+export const getPublicShopDetailService = async (shopId) => {
+  return getShopProfileService(shopId);
 };

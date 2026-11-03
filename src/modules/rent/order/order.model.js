@@ -328,6 +328,12 @@ const rentalOrderSchema = new mongoose.Schema(
       required: [true, "renterId là bắt buộc"],
       index: true,
     },
+    orderGroupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "OrderGroup",
+      default: null,
+      index: true,
+    },
     // AC: shopOwnerId luôn là Shop Owner duy nhất
     shopOwnerId: {
       type: mongoose.Schema.Types.ObjectId,

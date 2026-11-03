@@ -63,7 +63,10 @@ const sanitizeThriftForClient = (item) => {
 
 // 1. Tạo listing mới (Shop Owner)
 export const createListing = async (userId, data) => {
-  const safeData = { ...data, location: normalizeShopBranch(data?.location) };
+  const User = (await import("../../user/user.model.js")).default;
+  const owner = await User.findById(userId).select("address shopProfile");
+  const shopLoc = data?.location || owner?.address?.province || owner?.shopProfile?.cityRegion || "Thành phố Đà Nẵng";
+  const safeData = { ...data, location: shopLoc };
   if (Array.isArray(safeData.images)) {
     safeData.images = await uploadBase64ThriftImages(safeData.images);
   }
@@ -138,7 +141,7 @@ export const getPublicListings = async (query = {}) => {
     // Luôn giữ các sản phẩm đã bán/đã mua (SOLD) hiển thị trên Thrift Marketplace
     filter.status = { $in: ["APPROVED", "SOLD"] };
   }
-  const items = await ThriftListing.find(filter).populate("categoryId", "name").lean();
+  const items = await ThriftListing.find(filter).populate("categoryId", "name").populate("ownerId", "fullName email phoneNumber address avatarUrl role shopProfile kycStatus").lean();
   return items.map(sanitizeThriftForClient);
 };
 
@@ -146,7 +149,7 @@ export const getPublicListings = async (query = {}) => {
 export const getListingById = async (listingId) => {
   const listing = await ThriftListing.findById(listingId)
     .populate("categoryId", "name")
-    .populate("ownerId", "fullName email phoneNumber address")
+    .populate("ownerId", "fullName email phoneNumber address avatarUrl role shopProfile kycStatus")
     .lean();
   if (!listing) {
     const error = new Error("Sản phẩm thanh lý không tồn tại");
@@ -272,12 +275,8 @@ export const getShopListings = async (userId) => {
       .sort({ createdAt: -1 })
       .lean();
   }
-  if (items.length === 0) {
-    items = await ThriftListing.find({})
-      .populate("categoryId", "name")
-      .sort({ createdAt: -1 })
-      .lean();
-  }
+  // Isolation: strictly return listings belonging to this owner
+  // Do not fallback to other shop owners' listings
   return items.map(sanitizeThriftForClient);
 };
 

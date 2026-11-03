@@ -1,3 +1,4 @@
+import LockAppeal from "../user/lockAppeal.model.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
@@ -21,7 +22,7 @@ const ensureUserCartAndWishlist = async (userId) => {
   ]);
 };
 
-const register = async ({ email, password, fullName, phoneNumber, role }) => {
+const register = async ({ email, password, fullName, phoneNumber, role, shopName, businessAddress, province }) => {
   const existingUser = await User.findOne({ email });
 
   if (existingUser) {
@@ -210,6 +211,22 @@ const login = async ({ email, password }) => {
     // Non-blocking
   }
 
+  // Kiểm tra tài khoản có bị tạm khóa hay không (Lưu trạng thái trong MongoDB)
+  if (user.status === "lock" || user.status === "locked" || user.status === "LOCKED" || user.status === "SUSPENDED" || user.isLocked) {
+    const error = new Error("Tài khoản của bạn đã bị tạm khóa bởi Quản trị viên");
+    error.statusCode = 403;
+    error.errorCode = "ACCOUNT_LOCKED";
+    error.data = {
+      isLocked: true,
+      email: user.email,
+      fullName: user.fullName,
+      lockReason: user.lockReason || "Tài khoản bị tạm khóa để kiểm tra bảo mật hoặc rà soát giao dịch",
+      lockedAt: user.lockedAt,
+      lockAppeal: user.lockAppeal || null,
+    };
+    throw error;
+  }
+
   const accessToken = jwt.sign(
     {
       id: user._id,
@@ -256,9 +273,69 @@ const getShopOwnerStatus = async () => {
   };
 };
 
+/**
+ * Người dùng gửi khiếu nại / đề nghị Admin xem xét mở khóa tài khoản
+ */
+const appealAccountLock = async ({ email, question, details }) => {
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  const user = await User.findOne({ email: cleanEmail });
+  if (!user) {
+    const error = new Error("Không tìm thấy tài khoản với email này");
+    error.statusCode = 404;
+    error.errorCode = "USER_NOT_FOUND";
+    throw error;
+  }
+
+  if (user.status !== "lock" && user.status !== "locked" && user.status !== "LOCKED" && user.status !== "SUSPENDED" && !user.isLocked) {
+    const error = new Error("Tài khoản này hiện đang hoạt động bình thường, không bị khóa");
+    error.statusCode = 400;
+    error.errorCode = "ACCOUNT_NOT_LOCKED";
+    throw error;
+  }
+
+  const submittedAt = new Date();
+  const appealQuestion = String(question || "Tôi không vi phạm quy tắc cộng đồng, đề nghị kiểm tra lại lý do khóa.").trim();
+  const appealDetails = String(details || "").trim();
+
+  // 1. Lưu bản ghi đơn khiếu nại vào collection 'appeals' trong MongoDB
+  const savedAppeal = await LockAppeal.create({
+    userId: user._id,
+    email: user.email,
+    fullName: user.fullName || "",
+    question: appealQuestion,
+    details: appealDetails,
+    lockReason: user.lockReason || "Tài khoản bị tạm khóa để kiểm tra an toàn hoặc rà soát vi phạm",
+    status: "PENDING",
+    adminReply: "",
+    submittedAt,
+    resolvedAt: null,
+  });
+
+  // 2. Đồng thời cập nhật trường lockAppeal trên bản ghi User trong MongoDB
+  user.lockAppeal = {
+    appealId: savedAppeal._id,
+    question: savedAppeal.question,
+    details: savedAppeal.details,
+    submittedAt: savedAppeal.submittedAt,
+    status: "PENDING",
+    adminReply: "",
+    resolvedAt: null,
+  };
+  user.markModified("lockAppeal");
+  await user.save();
+
+  return {
+    success: true,
+    message: "Đề nghị mở khóa tài khoản đã được lưu vào cơ sở dữ liệu và ghi nhận thành công. Quản trị viên sẽ kiểm tra và phản hồi sớm nhất qua email của bạn.",
+    lockAppeal: user.lockAppeal,
+    appealId: savedAppeal._id,
+  };
+};
+
 export {
   register,
   login,
   logout,
   getShopOwnerStatus,
+  appealAccountLock,
 };

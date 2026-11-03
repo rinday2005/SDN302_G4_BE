@@ -7,6 +7,7 @@ const errorMiddleware = (err, req, res, next) => {
     success: false,
     message: err.message || "Internal Server Error",
     errorCode: err.errorCode || "INTERNAL_SERVER_ERROR",
+    ...(err.data ? { data: err.data } : {}),
   });
 };
 

@@ -26,10 +26,9 @@ const resolveUserFromDecodedToken = async (decoded) => {
     user = await User.findOne({ role: decoded.role });
   }
 
+  // Do not fallback to arbitrary shop owner
   if (!user) {
-    user =
-      (await User.findOne({ role: "SHOP_OWNER" })) ||
-      (await User.findOne({}));
+    return null;
   }
 
   return user;

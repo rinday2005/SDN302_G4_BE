@@ -160,3 +160,36 @@ export const updatePlatformFeeController = async (req, res, next) => {
     next(error);
   }
 };
+
+import {
+  getAllShopsAdminService,
+  getShopDetailAdminService,
+  reviewShopKycAdminService,
+} from "./admin.service.js";
+
+export const getAllShopsAdminController = async (req, res, next) => {
+  try {
+    const shops = await getAllShopsAdminService(req.query);
+    return successResponse(res, "Lấy danh sách Shop Owner thành công", shops);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getShopDetailAdminController = async (req, res, next) => {
+  try {
+    const shop = await getShopDetailAdminService(req.params.id);
+    return successResponse(res, "Lấy chi tiết Shop Owner thành công", shop);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const reviewShopKycAdminController = async (req, res, next) => {
+  try {
+    const result = await reviewShopKycAdminService(req.params.id, req.body);
+    return successResponse(res, "Cập nhật trạng thái KYC Shop thành công", result);
+  } catch (err) {
+    next(err);
+  }
+};

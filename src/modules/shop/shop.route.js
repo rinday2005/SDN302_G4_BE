@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getPublicShopController } from "./shop.controller.js";
 import authMiddleware, { optionalAuthMiddleware } from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
 import {
@@ -11,6 +12,7 @@ const router = Router();
 
 // 1. Profile Shop APIs
 router.get("/profile", optionalAuthMiddleware, getShopProfileController);
+router.get("/:shopId", optionalAuthMiddleware, getPublicShopController);
 router.put("/profile", optionalAuthMiddleware, updateShopProfileController);
 
 // 2. Revenue Analytics API (MongoDB Aggregation Pipeline)
