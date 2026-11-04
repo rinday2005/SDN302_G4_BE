@@ -11,7 +11,12 @@ import OrderGroup from "../../order/orderGroup.model.js";
 import RentalProduct from "../product/product.model.js";
 import Cart from "../../cart/cart.model.js";
 import { removeRentItems } from "../../cart/cart.service.js";
-import { checkRentalAvailability, releaseExpiredOrderHolds } from "../availability/availability.service.js";
+import {
+  checkRentalAvailability,
+  releaseExpiredOrderHolds,
+  createTemporaryHoldSlotsForOrder,
+  releaseOrderAvailabilitySlots,
+} from "../availability/availability.service.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee, normalizeShopBranch } from "../../../utils/shipping.js";
 import RentalReturn from "../return/return.model.js";
@@ -499,6 +504,7 @@ const cancelOrder = async (orderId, user) => {
 
   order.status = "CANCELLED";
   await order.save();
+  await releaseOrderAvailabilitySlots(order._id);
 
   return order;
 };
@@ -555,7 +561,7 @@ const approveOrder = async (orderId, user) => {
     }
   }
 
-  // Đặt khóa lịch tạm thời (Hold Slot) có hiệu lực trong HOLD_SLOT_DURATION_MINUTES phút
+  // Đặt khóa lịch tạm thời (Temporary Hold Slot) có hiệu lực trong HOLD_SLOT_DURATION_MINUTES (15 phút)
   order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
   order.approvedAt = now;
   order.holdExpiresAt = new Date(now.getTime() + HOLD_SLOT_DURATION_MS);
@@ -563,6 +569,9 @@ const approveOrder = async (orderId, user) => {
     order.paymentStatus = "PENDING";
   }
   await order.save();
+
+  // Tạo bản ghi Temporary Hold Slot trong RentalAvailability (kèm expiresAt cho TTL Index)
+  await createTemporaryHoldSlotsForOrder(order, order.holdExpiresAt);
 
   // [BE-S6-02] Bắn thông báo Shop duyệt đơn kèm thời hạn giữ chỗ
   sendSystemNotificationSafe({
@@ -582,12 +591,24 @@ const approveOrder = async (orderId, user) => {
 };
 
 /**
- * Từ chối đơn thuê (Chỉ Shop Owner duy nhất của hệ thống)
- * Chuyển trạng thái đơn sang REJECTED và giải phóng reservation
+ * Từ chối đơn thuê (Shop Owner / Admin)
+ * 1. Validate rejectionReason bắt buộc không rỗng
+ * 2. Cập nhật status = "REJECTED", rejectionReason, rejectedAt = new Date()
+ * 3. Giải phóng lịch BLOCKED / HOLD trong RentalAvailability của orderId này
+ * 4. Gửi thông báo hệ thống đến Renter kèm lý do từ chối
  */
-const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
+const rejectOrder = async (orderId, user, { rejectionReason = "", reason = "" } = {}) => {
   if (user.role !== "SHOP_OWNER" && user.role !== "ADMIN") {
     throw createError("Chỉ Shop Owner mới có quyền từ chối đơn thuê", 403, "FORBIDDEN");
+  }
+
+  const cleanReason = String(rejectionReason || reason || "").trim();
+  if (!cleanReason) {
+    throw createError(
+      "Vui lòng nhập lý do từ chối đơn thuê",
+      400,
+      "REJECTION_REASON_REQUIRED"
+    );
   }
 
   const order = await findRentalOrder(orderId);
@@ -599,30 +620,43 @@ const rejectOrder = async (orderId, user, { reason = "" } = {}) => {
     throw createError("Forbidden", 403, "FORBIDDEN");
   }
 
-  // AC: order đã xử lý không thể approve/reject lại
-  if (order.status !== RENTAL_ORDER_STATUS.PENDING) {
+  // Cho phép từ chối đơn khi đang chờ duyệt (PENDING) hoặc đang chờ thanh toán chưa trả tiền (WAITING_PAYMENT)
+  const rejectableStatuses = [
+    RENTAL_ORDER_STATUS.PENDING,
+    RENTAL_ORDER_STATUS.WAITING_PAYMENT,
+    RENTAL_ORDER_STATUS.APPROVED,
+  ];
+  if (!rejectableStatuses.includes(order.status) || order.paymentStatus === "PAID") {
     throw createError(
-      `Đơn hàng đã được xử lý hoặc không ở trạng thái chờ duyệt (Trạng thái hiện tại: ${order.status})`,
+      `Đơn hàng đã được xử lý hoặc không thể từ chối ở trạng thái hiện tại (${order.status})`,
       400,
       "ORDER_ALREADY_PROCESSED"
     );
   }
 
-  // AC: khi reject toàn bộ đơn chuyển REJECTED và giải phóng reservation
+  // Cập nhật RentalOrder trong MongoDB
   order.status = RENTAL_ORDER_STATUS.REJECTED;
-  if (reason) {
-    order.rejectionReason = reason.trim();
-  }
+  order.rejectionReason = cleanReason;
+  order.rejectedAt = new Date();
+  order.holdExpiresAt = null;
   await order.save();
 
-  // [BE-S6-02] Bắn thông báo Shop từ chối đơn
+  // Giải phóng lịch BLOCKED / HOLD của orderId này trong collection RentalAvailability
+  await releaseOrderAvailabilitySlots(order._id);
+
+  // [BE-S6-02] Bắn thông báo Shop từ chối đơn kèm lý do tới Renter
   sendSystemNotificationSafe({
     userId: order.renterId || order.userId,
     title: "Đơn thuê bị từ chối",
-    message: `Đơn thuê ${order.orderCode} đã bị chủ shop từ chối.${reason ? ` Lý do: ${reason}` : ""}`,
+    message: `Đơn thuê ${order.orderCode} đã bị chủ shop từ chối. Lý do: ${cleanReason}`,
     type: NOTIFICATION_TYPE.RENTAL_ORDER,
     link: `/orders/${order._id}`,
-    metadata: { orderId: order._id, orderCode: order.orderCode },
+    metadata: {
+      orderId: order._id,
+      orderCode: order.orderCode,
+      rejectionReason: cleanReason,
+      rejectedAt: order.rejectedAt,
+    },
   });
 
   return order;
