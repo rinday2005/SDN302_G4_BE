@@ -1,8 +1,9 @@
 import OrderGroup from "../order/orderGroup.model.js";
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
-import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
+import RentalOrder, { RENTAL_ORDER_STATUS, HOLD_SLOT_DURATION_MS } from "../rent/order/order.model.js";
 import RentalProduct from "../rent/product/product.model.js";
+import { checkRentalAvailability, releaseExpiredOrderHolds } from "../rent/availability/availability.service.js";
 import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
 import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
@@ -98,9 +99,39 @@ const createVnPayPaymentUrl = async ({
       throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
     }
     if (!isThrift && !(order.items && order.items[0]?.listingId)) {
+      // Giải phóng các đơn giữ chỗ tạm đã hết hạn
+      await releaseExpiredOrderHolds();
+
+      const now = new Date();
+      // Kiểm tra nếu đơn hiện tại đã hết hạn giữ chỗ nhưng chưa có ai khác đặt chen vào thì tự gia hạn tiếp
       let hasUpdates = false;
       if (startDate) { order.startDate = new Date(startDate); hasUpdates = true; }
       if (endDate) { order.endDate = new Date(endDate); hasUpdates = true; }
+
+      // [DATE OVERLAP VALIDATION - LOẠI TRỪ CHÍNH ĐƠN HIỆN TẠI (_id: { $ne: order._id })]
+      for (const item of order.items || []) {
+        const pid = item.productId?._id || item.productId;
+        if (pid && mongoose.Types.ObjectId.isValid(pid)) {
+          await checkRentalAvailability(pid, order.startDate, order.endDate, item.quantity || 1, {
+            excludeOrderId: order._id,
+          });
+        }
+      }
+
+      // Gia hạn tiếp thời gian giữ chỗ trong phiên thanh toán VNPay
+      if (
+        order.status === RENTAL_ORDER_STATUS.WAITING_PAYMENT ||
+        order.status === RENTAL_ORDER_STATUS.APPROVED ||
+        order.status === RENTAL_ORDER_STATUS.EXPIRED
+      ) {
+        if (order.status === RENTAL_ORDER_STATUS.EXPIRED) {
+          order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
+          order.paymentStatus = "PENDING";
+        }
+        order.holdExpiresAt = new Date(now.getTime() + HOLD_SLOT_DURATION_MS);
+        hasUpdates = true;
+      }
+
       if (shippingAddress && shippingAddress.province) {
         order.shippingAddress = {
           recipientName: shippingAddress.recipientName || order.shippingAddress?.recipientName || user.fullName || "Khách hàng",

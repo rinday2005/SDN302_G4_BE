@@ -26,12 +26,19 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   DISPUTED: "DISPUTED", // Đơn có tranh chấp giữa Renter và Shop Owner
   COMPLETED: "COMPLETED", // Hoàn tất đơn thuê
   CANCELLED: "CANCELLED", // Đơn bị hủy
+  APPROVED: "APPROVED", // Alias tương thích cho WAITING_PAYMENT
+  EXPIRED: "EXPIRED", // Quá hạn thanh toán sau khi Shop duyệt giữ chỗ
 });
+
+// Thời gian giữ chỗ tạm thời sau khi Shop bấm Duyệt (mặc định 30 phút)
+export const HOLD_SLOT_DURATION_MINUTES = 30;
+export const HOLD_SLOT_DURATION_MS = HOLD_SLOT_DURATION_MINUTES * 60 * 1000;
 
 // Các bước chuyển trạng thái hợp lệ
 export const RENTAL_ORDER_STATUS_TRANSITIONS = Object.freeze({
-  PENDING: ["WAITING_PAYMENT", "CONFIRMED", "REJECTED", "CANCELLED"],
-  WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED"],
+  PENDING: ["WAITING_PAYMENT", "APPROVED", "CONFIRMED", "REJECTED", "CANCELLED"],
+  WAITING_PAYMENT: ["PAID", "CONFIRMED", "CANCELLED", "EXPIRED"],
+  APPROVED: ["PAID", "CONFIRMED", "CANCELLED", "EXPIRED"],
   PAID: ["READY_FOR_HANDOVER", "HANDED_OVER", "CONFIRMED", "PREPARING", "CANCELLED", "DELIVERED", "RENTING"],
   READY_FOR_HANDOVER: ["HANDED_OVER", "SHIPPING", "CANCELLED"],
   HANDED_OVER: ["SHIPPING", "DELIVERED", "RENTING", "CANCELLED"],
@@ -417,8 +424,17 @@ const rentalOrderSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["PENDING", "PAID", "FAILED"],
+      enum: ["PENDING", "PAID", "FAILED", "EXPIRED"],
       default: "PENDING",
+      index: true,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    holdExpiresAt: {
+      type: Date,
+      default: null,
       index: true,
     },
     rejectionReason: {

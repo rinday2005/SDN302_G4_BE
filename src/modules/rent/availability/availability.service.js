@@ -1,21 +1,82 @@
+import mongoose from "mongoose";
 import RentalProduct from "../product/rentalProduct.model.js";
-import RentalOrder from "../order/order.model.js";
+import RentalOrder, { RENTAL_ORDER_STATUS, HOLD_SLOT_DURATION_MS } from "../order/order.model.js";
 import RentalAvailability from "./availability.model.js";
 import { isDateOverlap } from "./availability.utils.js";
 
+// Các trạng thái đơn hàng KHÔNG chiếm giữ tồn kho (đã hủy, từ chối, quá hạn thanh toán, đã trả xong)
+export const NON_BLOCKING_ORDER_STATUSES = Object.freeze([
+  RENTAL_ORDER_STATUS.REJECTED,
+  RENTAL_ORDER_STATUS.CANCELLED,
+  RENTAL_ORDER_STATUS.EXPIRED,
+  RENTAL_ORDER_STATUS.COMPLETED,
+]);
+
+// Các trạng thái đơn hàng ĐANG khóa lịch thực sự (Shop đã duyệt giữ chỗ tạm thời hoặc Khách đã thanh toán / đang thuê)
+export const LOCKING_ORDER_STATUSES = Object.freeze([
+  RENTAL_ORDER_STATUS.WAITING_PAYMENT,
+  RENTAL_ORDER_STATUS.APPROVED,
+  RENTAL_ORDER_STATUS.PAID,
+  RENTAL_ORDER_STATUS.CONFIRMED,
+  RENTAL_ORDER_STATUS.PREPARING,
+  RENTAL_ORDER_STATUS.READY_FOR_HANDOVER,
+  RENTAL_ORDER_STATUS.HANDED_OVER,
+  RENTAL_ORDER_STATUS.SHIPPING,
+  RENTAL_ORDER_STATUS.DELIVERED,
+  RENTAL_ORDER_STATUS.RENTING,
+  RENTAL_ORDER_STATUS.RETURN_REQUESTED,
+  RENTAL_ORDER_STATUS.RETURNING,
+  RENTAL_ORDER_STATUS.RETURNED,
+]);
+
 /**
- * Kiểm tra khả dụng lịch thuê
+ * Tự động giải phóng (chuyển sang EXPIRED) các đơn hàng ở trạng thái WAITING_PAYMENT / APPROVED
+ * nhưng đã quá hạn giữ chỗ (holdExpiresAt < now) mà người thuê chưa thanh toán.
+ */
+export const releaseExpiredOrderHolds = async (productId = null) => {
+  const now = new Date();
+  const filter = {
+    status: { $in: [RENTAL_ORDER_STATUS.WAITING_PAYMENT, RENTAL_ORDER_STATUS.APPROVED] },
+    paymentStatus: { $ne: "PAID" },
+    holdExpiresAt: { $ne: null, $lt: now },
+  };
+
+  if (productId && mongoose.Types.ObjectId.isValid(productId)) {
+    filter["items.productId"] = productId;
+  }
+
+  await RentalOrder.updateMany(filter, {
+    $set: {
+      status: RENTAL_ORDER_STATUS.EXPIRED,
+      paymentStatus: "EXPIRED",
+    },
+  });
+};
+
+/**
+ * Kiểm tra khả dụng lịch thuê (Date Overlap Validation & Hold/Lock Slot P2P Rental)
+ * Công thức chuẩn: (startDate1 <= endDate2) AND (endDate1 >= startDate2)
+ *
  * @param {string|ObjectId} productId - ID sản phẩm cần thuê
  * @param {Date|string} startDate - Ngày bắt đầu thuê
  * @param {Date|string} endDate - Ngày kết thúc thuê
  * @param {number} requestedQty - Số lượng cần thuê
+ * @param {Object} options - Tùy chọn nâng cao: { excludeOrderId, includePending }
  */
 export const checkRentalAvailability = async (
   productId,
   startDate,
   endDate,
-  requestedQty = 1
+  requestedQty = 1,
+  options = {}
 ) => {
+  const normalizedOptions =
+    typeof options === "string" || options instanceof mongoose.Types.ObjectId
+      ? { excludeOrderId: options }
+      : options || {};
+
+  const { excludeOrderId = null, includePending = false } = normalizedOptions;
+
   const reqStart = new Date(startDate);
   const reqEnd = new Date(endDate);
 
@@ -41,6 +102,9 @@ export const checkRentalAvailability = async (
     throw error;
   }
 
+  // 0. Giải phóng các đơn giữ chỗ tạm thời đã hết hạn trước khi kiểm tra tồn kho
+  await releaseExpiredOrderHolds(productId);
+
   // 1. Lấy thông tin sản phẩm để biết tổng tồn kho (totalQuantity)
   const product = await RentalProduct.findById(productId);
   if (!product) {
@@ -50,12 +114,41 @@ export const checkRentalAvailability = async (
     throw error;
   }
 
-  // 2. Tìm tất cả đơn hàng chứa sản phẩm này và đang chiếm giữ tồn kho
-  // Loại bỏ các đơn REJECTED, CANCELLED và COMPLETED
-  const activeOrders = await RentalOrder.find({
-    status: { $nin: ["REJECTED", "CANCELLED", "COMPLETED"] },
+  // 2. Xây dựng Query MongoDB chuẩn kiểm tra trùng ngày:
+  //    (order.startDate <= reqEnd) AND (order.endDate >= reqStart)
+  //    Bắt buộc loại trừ chính đơn hàng hiện tại (_id: { $ne: currentOrderId })
+  //    và bỏ qua các đơn CANCELLED, REJECTED, EXPIRED, COMPLETED
+  const now = new Date();
+  const blockingStatuses = includePending
+    ? [...LOCKING_ORDER_STATUSES, RENTAL_ORDER_STATUS.PENDING]
+    : LOCKING_ORDER_STATUSES;
+
+  const overlapQuery = {
     "items.productId": productId,
-  });
+    status: {
+      $in: blockingStatuses,
+      $nin: NON_BLOCKING_ORDER_STATUSES,
+    },
+    startDate: { $lte: reqEnd },
+    endDate: { $gte: reqStart },
+    // Chỉ tính các đơn đã thanh toán hoặc đang trong thời gian khóa tạm (chưa hết hạn holdExpiresAt)
+    $or: [
+      { status: { $nin: [RENTAL_ORDER_STATUS.WAITING_PAYMENT, RENTAL_ORDER_STATUS.APPROVED] } },
+      { holdExpiresAt: null },
+      { holdExpiresAt: { $gt: now } },
+    ],
+  };
+
+  if (excludeOrderId) {
+    if (mongoose.Types.ObjectId.isValid(excludeOrderId)) {
+      overlapQuery._id = { $ne: new mongoose.Types.ObjectId(excludeOrderId) };
+    } else {
+      const cleanCode = String(excludeOrderId).replace(/^#/, "").trim();
+      overlapQuery.orderCode = { $nin: [cleanCode, `#${cleanCode}`] };
+    }
+  }
+
+  const activeOrders = await RentalOrder.find(overlapQuery);
 
   // 3. Tính tổng số lượng đang được đặt trong khoảng thời gian bị overlap
   let totalBookedQty = 0;
@@ -71,9 +164,16 @@ export const checkRentalAvailability = async (
   }
 
   // 3.1. Tính thêm các khoảng thời gian bị shop owner khóa thủ công (bảo trì/kiểm định)
-  const manualBlocks = await RentalAvailability.find({
+  const manualBlockQuery = {
     productId,
-  });
+    startDate: { $lte: reqEnd },
+    endDate: { $gte: reqStart },
+  };
+  if (excludeOrderId && mongoose.Types.ObjectId.isValid(excludeOrderId)) {
+    manualBlockQuery.orderId = { $ne: new mongoose.Types.ObjectId(excludeOrderId) };
+  }
+
+  const manualBlocks = await RentalAvailability.find(manualBlockQuery);
   for (const block of manualBlocks) {
     if (isDateOverlap(reqStart, reqEnd, block.startDate, block.endDate)) {
       totalBookedQty += block.blockedQuantity || 1;
@@ -86,8 +186,10 @@ export const checkRentalAvailability = async (
 
   // 5. Nếu số lượng yêu cầu lớn hơn tồn kho khả dụng -> ném lỗi 409
   if (requestedQty > availableQty) {
+    const startStr = reqStart.toISOString().slice(0, 10);
+    const endStr = reqEnd.toISOString().slice(0, 10);
     const error = new Error(
-      `Sản phẩm không đủ số lượng khả dụng trong khoảng thời gian này (Còn lại: ${Math.max(
+      `Kỳ thuê bạn chọn (${startStr} -> ${endStr}) của sản phẩm "${product.name}" bị trùng ngày đã có khách đặt trước hoặc đang được giữ chỗ (Còn lại: ${Math.max(
         0,
         availableQty
       )}, Yêu cầu: ${requestedQty})`
@@ -108,11 +210,16 @@ export const checkRentalAvailability = async (
   };
 };
 
+// Alias chuẩn theo yêu cầu nghiệp vụ
+export const checkItemAvailability = checkRentalAvailability;
+
 /**
  * Lấy danh sách các khoảng thời gian đã được đặt hoặc bị khóa của một sản phẩm
  * (Dùng cho Calendar DatePicker phía FE hiển thị disable các ngày đã hết đồ)
  */
-export const getProductBookedDates = async (productId) => {
+export const getProductBookedDates = async (productId, options = {}) => {
+  await releaseExpiredOrderHolds(productId);
+
   const product = await RentalProduct.findById(productId);
   if (!product) {
     const error = new Error("Sản phẩm không tồn tại");
@@ -121,10 +228,29 @@ export const getProductBookedDates = async (productId) => {
     throw error;
   }
 
-  const activeOrders = await RentalOrder.find({
-    status: { $nin: ["REJECTED", "CANCELLED", "COMPLETED"] },
+  const { excludeOrderId = null } = options || {};
+  const now = new Date();
+
+  const orderFilter = {
+    status: {
+      $in: LOCKING_ORDER_STATUSES,
+      $nin: NON_BLOCKING_ORDER_STATUSES,
+    },
     "items.productId": productId,
-  }).select("orderCode startDate endDate items status");
+    $or: [
+      { status: { $nin: [RENTAL_ORDER_STATUS.WAITING_PAYMENT, RENTAL_ORDER_STATUS.APPROVED] } },
+      { holdExpiresAt: null },
+      { holdExpiresAt: { $gt: now } },
+    ],
+  };
+
+  if (excludeOrderId && mongoose.Types.ObjectId.isValid(excludeOrderId)) {
+    orderFilter._id = { $ne: new mongoose.Types.ObjectId(excludeOrderId) };
+  }
+
+  const activeOrders = await RentalOrder.find(orderFilter).select(
+    "_id orderCode renterId startDate endDate items status holdExpiresAt"
+  );
 
   const manualBlocks = await RentalAvailability.find({ productId });
 
@@ -133,12 +259,15 @@ export const getProductBookedDates = async (productId) => {
       (i) => i.productId.toString() === productId.toString()
     );
     return {
+      orderId: order._id,
       orderCode: order.orderCode,
+      renterId: order.renterId,
       startDate: order.startDate,
       endDate: order.endDate,
       quantity: targetItem?.quantity || 1,
       type: "RENTAL_ORDER",
       status: order.status,
+      holdExpiresAt: order.holdExpiresAt || null,
     };
   });
 
@@ -154,6 +283,7 @@ export const getProductBookedDates = async (productId) => {
   return {
     productId,
     totalQuantity: product.totalQuantity || product.stockQuantity || 1,
+    holdDurationMs: HOLD_SLOT_DURATION_MS,
     bookedRanges: [...bookedRanges, ...blockedRanges],
   };
 };
@@ -172,7 +302,8 @@ export const blockAvailabilityDates = async (user, data) => {
     throw error;
   }
 
-  if (product.shopOwnerId.toString() !== user._id.toString() && user.role !== "ADMIN") {
+  const ownerId = product.shopOwnerId || product.ownerId || product.shopId;
+  if (ownerId && ownerId.toString() !== user._id.toString() && user.role !== "ADMIN") {
     const error = new Error("Chỉ chủ sở hữu thiết bị mới có quyền khóa lịch bảo dưỡng");
     error.statusCode = 403;
     error.errorCode = "FORBIDDEN";
