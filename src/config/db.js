@@ -56,8 +56,8 @@ const syncLocalUsersAndEnsureDefaults = async () => {
   try {
     const defaultPasswordHash = await bcrypt.hash("Password123!", 10);
 
-    // 1. Ensure single SHOP_OWNER exists
-    let shopOwner = await User.findOne({ email: "shopowner@reuse.vn" }) || await User.findOne({ role: "SHOP_OWNER" });
+    // 1. Ensure single SHOP_OWNER exists and is KYC verified
+    let shopOwner = (await User.findOne({ email: "shopowner@reuse.vn" })) || (await User.findOne({ role: "SHOP_OWNER" }));
     if (!shopOwner) {
       shopOwner = await User.findOneAndUpdate(
         { email: "shopowner@reuse.vn" },
@@ -70,10 +70,10 @@ const syncLocalUsersAndEnsureDefaults = async () => {
             role: "SHOP_OWNER",
             kycStatus: "APPROVED",
             address: {
-              province: "Hồ Chí Minh",
-              district: "Quận 1",
-              ward: "Bến Nghé",
-              detail: "123 Lê Lợi, Phường Bến Nghé",
+              province: "Thành phố Đà Nẵng",
+              district: "Quận Hải Châu",
+              ward: "Phường Hải Châu 1",
+              detail: "48 Bạch Đằng",
             },
           },
         },
@@ -90,7 +90,7 @@ const syncLocalUsersAndEnsureDefaults = async () => {
           frontImageUrl: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=500&auto=format&fit=crop&q=80",
           backImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&auto=format&fit=crop&q=80",
           dob: "1990-01-15",
-          residentAddress: "Quận 1, TP. Hồ Chí Minh",
+          residentAddress: "Quận Hải Châu, TP. Đà Nẵng",
           status: "APPROVED",
         });
       }
@@ -144,63 +144,10 @@ const syncLocalUsersAndEnsureDefaults = async () => {
       );
     }
 
-    // 3. If connected to Atlas (mongodb+srv), attempt non-blocking sync of users from local MongoDB
-    if (MONGO_URI && MONGO_URI.startsWith("mongodb+srv://")) {
-      const localDbNames = ["reuse_hub", "reuse-hub"];
-      for (const dbName of localDbNames) {
-        let localConn = null;
-        try {
-          localConn = await mongoose
-            .createConnection(`mongodb://127.0.0.1:27017/${dbName}`, {
-              serverSelectionTimeoutMS: 1200,
-            })
-            .asPromise();
-
-          const localUsers = await localConn.db
-            .collection("users")
-            .find({})
-            .toArray();
-
-          for (const lu of localUsers) {
-            if (!lu.email) continue;
-            const normalizedEmail = String(lu.email).toLowerCase().trim();
-            const existing = await User.findOne({ email: normalizedEmail });
-            if (!existing) {
-              const roleToAssign =
-                lu.role === "SHOP_OWNER" && shopOwner
-                  ? "USER"
-                  : lu.role || "USER";
-              await User.create({
-                email: normalizedEmail,
-                passwordHash: lu.passwordHash || defaultPasswordHash,
-                fullName: lu.fullName || normalizedEmail.split("@")[0],
-                phoneNumber: lu.phoneNumber || "0901234567",
-                role: roleToAssign,
-                kycStatus: lu.kycStatus || "APPROVED",
-                avatarUrl: lu.avatarUrl || null,
-                address: lu.address || null,
-                walletBalance: Number(lu.walletBalance) || 0,
-              });
-            }
-          }
-        } catch {
-          // Local MongoDB not running or unreachable; safely ignore
-        } finally {
-          if (localConn) {
-            try {
-              await localConn.close();
-            } catch {
-              // ignore
-            }
-          }
-        }
-      }
-    }
-
-    // 4. Strictly enforce 1 User = 1 Cart & 1 Wishlist in MongoDB
+    // 3. Strictly enforce 1 User = 1 Cart & 1 Wishlist in MongoDB
     await syncUserCartsAndWishlists();
 
-    // 5. Chuẩn hóa chi nhánh sản phẩm (RENT & THRIFT) về 3 chi nhánh: Đà Nẵng, Hà Nội, TP. Hồ Chí Minh
+    // 4. Chuẩn hóa chi nhánh sản phẩm (RENT & THRIFT) về 3 chi nhánh: Đà Nẵng, Hà Nội, TP. Hồ Chí Minh
     const allRentOrders = await RentalOrder.find({}).populate("items.productId", "location").lean();
     for (const ro of allRentOrders) {
       const firstItem = Array.isArray(ro.items) ? ro.items[0] : null;
@@ -218,6 +165,7 @@ const syncLocalUsersAndEnsureDefaults = async () => {
         }
       }
     }
+
     const [rentDocs, thriftDocs] = await Promise.all([
       RentalProduct.find({ location: { $nin: SHOP_BRANCHES } }).select("_id location").lean(),
       ThriftListing.find({ location: { $nin: SHOP_BRANCHES } }).select("_id location").lean(),
@@ -244,7 +192,10 @@ const connectDB = async () => {
   try {
     await mongoose.connect(MONGO_URI);
     console.log("MongoDB connected");
-    await syncLocalUsersAndEnsureDefaults();
+    // Run maintenance & bootstrap in background without delaying server listening
+    syncLocalUsersAndEnsureDefaults().catch((err) => {
+      console.warn("User bootstrap warning:", err.message);
+    });
   } catch (error) {
     console.error("MongoDB connection failed:", error.message);
     throw error;

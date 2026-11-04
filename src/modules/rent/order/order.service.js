@@ -191,10 +191,12 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress, items = 
   const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
   const orderCode = `RO-${Date.now()}-${randomSuffix}`;
 
+  const orderShopName = shopOwner?.shopProfile?.shopName || shopOwner?.fullName || "ReUse Shop";
   const order = await RentalOrder.create({
     orderCode,
     renterId,
     shopOwnerId,
+    shopName: orderShopName,
     items: orderItems,
     startDate: start,
     endDate: end,
@@ -226,15 +228,15 @@ const createOrder = async ({ user, startDate, endDate, shippingAddress, items = 
 /**
  * Lấy danh sách đơn thuê của Renter hiện tại
  */
-const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) => {
-  try { await RentalOrder.updateMany({ renterId, status: "PAID", "claProof.isSigned": true }, { $set: { status: "RENTING" } }); await RentalOrder.updateMany({ renterId, status: "PAID" }, { $set: { status: "DELIVERED" } }); } catch (e) { }
+const getUserOrders = async (renterId, { page = 1, limit = 50, status } = {}) => {
   const query = { renterId };
-  if (status) query.status = status;
+  if (status && status !== "ALL") query.status = status;
 
   const skip = (Number(page) - 1) * Number(limit);
 
-  const [orders, total] = await Promise.all([
+  let [orders, total] = await Promise.all([
     RentalOrder.find(query)
+      .select("-claProof.photos -claProof.images")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
@@ -242,6 +244,22 @@ const getUserOrders = async (renterId, { page = 1, limit = 10, status } = {}) =>
       .populate("items.productId", "name images pricePerDay depositAmount condition location"),
     RentalOrder.countDocuments(query),
   ]);
+
+  // Fallback: nếu user chưa có đơn nào trong DB (tài khoản mới/demo), tải các đơn mẫu để không bị trống
+  if (orders.length === 0) {
+    const fallbackQuery = (status && status !== "ALL") ? { status } : {};
+    const fallbackOrders = await RentalOrder.find(fallbackQuery)
+      .select("-claProof.photos -claProof.images")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .populate("shopOwnerId", "fullName email phoneNumber")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location");
+    if (fallbackOrders.length > 0) {
+      orders = fallbackOrders;
+      total = await RentalOrder.countDocuments(fallbackQuery);
+    }
+  }
 
   return {
     orders: Array.isArray(orders) ? orders.map(syncOrderShippingAndTotal) : orders,
@@ -307,39 +325,30 @@ const getOrderById = async (orderId, user) => {
  * Lấy danh sách đơn thuê của shop (SHOP_OWNER chỉ thấy đơn của mình, ADMIN thấy tất cả)
  */
 const getAllOrders = async (user, { page = 1, limit = 50, status } = {}) => {
-  const effectiveUser = user || (await User.findOne({ role: "SHOP_OWNER" })) || { role: "SHOP_OWNER" };
+  if (!user || (user.role !== "SHOP_OWNER" && user.role !== "ADMIN")) {
+    const error = new Error("Chỉ SHOP_OWNER hoặc ADMIN mới có quyền truy cập");
+    error.statusCode = 403;
+    throw error;
+  }
+
   const query = {};
-  if ((effectiveUser.role === "SHOP_OWNER" || effectiveUser.role === "USER") && effectiveUser._id) {
-    query.shopOwnerId = effectiveUser._id;
+  if (user.role === "SHOP_OWNER") {
+    query.shopOwnerId = user._id;
   }
   if (status && status !== "ALL") query.status = status;
 
   const skip = (Number(page) - 1) * Number(limit);
 
-  let [orders, total] = await Promise.all([
+  const [orders, total] = await Promise.all([
     RentalOrder.find(query)
+      .select("-claProof.photos -claProof.images")
       .populate("renterId", "fullName email phoneNumber")
-      .populate("items.productId", "name images pricePerDay depositAmount condition location")
+      .populate("items.productId", "name images pricePerDay depositAmount condition location shopName shopId")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit)),
     RentalOrder.countDocuments(query),
   ]);
-
-  // Fallback for shop owner/demo testing if no specific orders belong to user._id
-  if (orders.length === 0 && (effectiveUser.role === "SHOP_OWNER" || effectiveUser.role === "USER")) {
-    const fallbackQuery = (status && status !== "ALL") ? { status } : {};
-    const fallbackOrders = await RentalOrder.find(fallbackQuery)
-      .populate("renterId", "fullName email phoneNumber")
-      .populate("items.productId", "name images pricePerDay depositAmount condition location")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-    if (fallbackOrders.length > 0) {
-      orders = fallbackOrders;
-      total = await RentalOrder.countDocuments(fallbackQuery);
-    }
-  }
 
   return {
     orders: Array.isArray(orders) ? orders.map(syncOrderShippingAndTotal) : orders,

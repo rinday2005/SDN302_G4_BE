@@ -130,6 +130,11 @@ const thriftOrderSchema = new mongoose.Schema(
       ref: "User",
       index: true,
     },
+    shopName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import User from "../user/user.model.js";
 import RentalOrder from "../rent/order/order.model.js";
 import ThriftOrder from "../thrift/order/thriftOrder.model.js";
+import RentalProduct from "../rent/product/product.model.js";
+import ThriftListing from "../thrift/listing/thriftListing.model.js";
 
 /**
  * Lấy thông tin Shop Profile của Shop Owner từ MongoDB
@@ -13,8 +15,7 @@ export const getShopProfileService = async (userId) => {
     user = await User.findById(userId);
   }
 
-  // Nếu user không có role SHOP_OWNER, tìm tài khoản SHOP_OWNER duy nhất trong hệ thống
-  if (!user || user.role !== "SHOP_OWNER") {
+  if (!user) {
     user = await User.findOne({ role: "SHOP_OWNER" });
   }
 
@@ -28,8 +29,8 @@ export const getShopProfileService = async (userId) => {
 
   return {
     shopId: user._id,
-    shopName: shopProfile.shopName || user.fullName || "Atelier Chronos & Optics Ltd.",
-    ownerName: user.fullName || "Phạm Thùy Dương",
+    shopName: shopProfile.shopName || user.fullName || "Cửa hàng ReUse",
+    ownerName: user.fullName || "Chủ cửa hàng",
     email: user.email,
     secondaryEmail: shopProfile.secondaryEmail || "",
     phoneNumber: user.phoneNumber || "",
@@ -39,13 +40,13 @@ export const getShopProfileService = async (userId) => {
         ? [user.address.detail, user.address.ward, user.address.district, user.address.province]
             .filter(Boolean)
             .join(", ")
-        : "48 Bạch Đằng, Phường Hải Châu 1, Quận Hải Châu, Thành phố Đà Nẵng"),
-    cityRegion: shopProfile.cityRegion || user.address?.province || "Đà Nẵng, Việt Nam",
-    avatarUrl: user.avatarUrl || "",
+        : ""),
+    cityRegion: shopProfile.cityRegion || user.address?.province || "",
+    avatarUrl: user.shopProfile?.avatarUrl || user.avatarUrl || "",
     coverUrl: shopProfile.coverUrl || "",
     description: shopProfile.description || "",
     specialization: shopProfile.specialization || "",
-    roleTitle: shopProfile.roleTitle || "Master Curator & Archival Custodian",
+    roleTitle: shopProfile.roleTitle || "Chủ cửa hàng",
     addressObject: user.address
       ? {
           province: user.address.province || "",
@@ -129,6 +130,8 @@ export const updateShopProfileService = async (userId, updateData) => {
 
   if (updateData.avatarUrl !== undefined) {
     user.avatarUrl = updateData.avatarUrl.trim();
+    if (!user.shopProfile) user.shopProfile = {};
+    user.shopProfile.avatarUrl = updateData.avatarUrl.trim();
   }
 
   // 3. Cập nhật subdocument shopProfile
@@ -201,6 +204,14 @@ export const updateShopProfileService = async (userId, updateData) => {
   }
 
   await user.save();
+  // Đồng bộ vị trí kho hàng của Shop sang toàn bộ sản phẩm RENT và THRIFT
+  try {
+    const syncLocation = user.address?.province || user.shopProfile?.cityRegion || "Hồ Chí Minh";
+    await RentalProduct.updateMany({ ownerId: user._id }, { $set: { location: syncLocation } });
+    await ThriftListing.updateMany({ ownerId: user._id }, { $set: { location: syncLocation } });
+  } catch (syncErr) {
+    console.warn("Could not sync product locations with shop address:", syncErr);
+  }
 
   return getShopProfileService(user._id);
 };
@@ -301,6 +312,13 @@ export const getShopRevenueService = async (userId, queryFilters = {}) => {
     status: "COMPLETED",
     ...dateMatch,
   };
+  if (ownerId) {
+    thriftMatch.$or = [
+      { shopOwnerId: ownerId },
+      { "items.ownerId": ownerId },
+      { "items.sellerId": ownerId },
+    ];
+  }
 
   const thriftOverviewPromise = ThriftOrder.aggregate([
     { $match: thriftMatch },

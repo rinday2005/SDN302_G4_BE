@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Wishlist from "./wishlist.model.js";
 import RentalProduct from "../rent/product/rentalProduct.model.js";
 import ThriftListing from "../thrift/listing/thriftListing.model.js";
+import Category from "../category/category.model.js";
 
 /**
  * Helper tự động phát hiện và chuẩn hóa loại sản phẩm (RENT hay THRIFT) từ cơ sở dữ liệu.

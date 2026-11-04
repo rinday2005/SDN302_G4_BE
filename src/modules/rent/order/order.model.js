@@ -350,6 +350,11 @@ const rentalOrderSchema = new mongoose.Schema(
         message: "shopOwnerId không hợp lệ hoặc tài khoản không có quyền SHOP_OWNER",
       },
     },
+    shopName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     // AC: một RentalOrder có thể chứa nhiều sản phẩm RENT
     items: {
       type: [rentalOrderItemSchema],
