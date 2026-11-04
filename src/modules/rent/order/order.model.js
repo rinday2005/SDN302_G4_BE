@@ -30,8 +30,8 @@ export const RENTAL_ORDER_STATUS = Object.freeze({
   EXPIRED: "EXPIRED", // Quá hạn thanh toán sau khi Shop duyệt giữ chỗ
 });
 
-// Thời gian giữ chỗ tạm thời sau khi Shop bấm Duyệt (mặc định 30 phút)
-export const HOLD_SLOT_DURATION_MINUTES = 30;
+// Thời gian giữ chỗ tạm thời sau khi Shop bấm Duyệt (mặc định 15 phút chuẩn P2P Rental)
+export const HOLD_SLOT_DURATION_MINUTES = 15;
 export const HOLD_SLOT_DURATION_MS = HOLD_SLOT_DURATION_MINUTES * 60 * 1000;
 
 // Các bước chuyển trạng thái hợp lệ
@@ -441,6 +441,10 @@ const rentalOrderSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    rejectedAt: {
+      type: Date,
+      default: null,
     },
     receivedAt: {
       type: Date,

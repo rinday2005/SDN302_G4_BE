@@ -1,9 +1,18 @@
 import OrderGroup from "../order/orderGroup.model.js";
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
-import RentalOrder, { RENTAL_ORDER_STATUS, HOLD_SLOT_DURATION_MS } from "../rent/order/order.model.js";
+import RentalOrder, {
+  RENTAL_ORDER_STATUS,
+  HOLD_SLOT_DURATION_MINUTES,
+  HOLD_SLOT_DURATION_MS,
+} from "../rent/order/order.model.js";
 import RentalProduct from "../rent/product/product.model.js";
-import { checkRentalAvailability, releaseExpiredOrderHolds } from "../rent/availability/availability.service.js";
+import {
+  checkRentalAvailability,
+  releaseExpiredOrderHolds,
+  createTemporaryHoldSlotsForOrder,
+  confirmHoldSlotsForPaidOrder,
+} from "../rent/availability/availability.service.js";
 import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
 import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
@@ -99,38 +108,60 @@ const createVnPayPaymentUrl = async ({
       throw createError("Bạn không có quyền thanh toán đơn hàng này", 403, "FORBIDDEN");
     }
     if (!isThrift && !(order.items && order.items[0]?.listingId)) {
-      // Giải phóng các đơn giữ chỗ tạm đã hết hạn
-      await releaseExpiredOrderHolds();
-
       const now = new Date();
-      // Kiểm tra nếu đơn hiện tại đã hết hạn giữ chỗ nhưng chưa có ai khác đặt chen vào thì tự gia hạn tiếp
       let hasUpdates = false;
+      const datesChanged =
+        (startDate && new Date(startDate).getTime() !== new Date(order.startDate).getTime()) ||
+        (endDate && new Date(endDate).getTime() !== new Date(order.endDate).getTime());
+
       if (startDate) { order.startDate = new Date(startDate); hasUpdates = true; }
       if (endDate) { order.endDate = new Date(endDate); hasUpdates = true; }
 
-      // [DATE OVERLAP VALIDATION - LOẠI TRỪ CHÍNH ĐƠN HIỆN TẠI (_id: { $ne: order._id })]
-      for (const item of order.items || []) {
-        const pid = item.productId?._id || item.productId;
-        if (pid && mongoose.Types.ObjectId.isValid(pid)) {
-          await checkRentalAvailability(pid, order.startDate, order.endDate, item.quantity || 1, {
-            excludeOrderId: order._id,
-          });
+      // (a) Xác minh trạng thái đơn hàng có hợp lệ để thanh toán hay không (WAITING_PAYMENT / APPROVED)
+      if (
+        order.status === RENTAL_ORDER_STATUS.CANCELLED ||
+        order.status === RENTAL_ORDER_STATUS.REJECTED
+      ) {
+        throw createError(
+          `Đơn thuê ${order.orderCode} đã bị hủy hoặc từ chối (${order.status}), không thể thanh toán.`,
+          400,
+          "ORDER_NOT_PAYABLE"
+        );
+      }
+
+      // (b) Kiểm tra thời gian Hold giữ chỗ 15 phút (Expiry Check):
+      //     - Nếu đơn ĐANG ở WAITING_PAYMENT / APPROVED và CHƯA hết hạn holdExpiresAt (và khách không đổi ngày):
+      //       => Slot lịch đã được Lock riêng cho chính đơn này từ bước Shop duyệt -> KHÔNG chạy check trùng lịch chung chung nữa!
+      //     - Nếu thời gian giữ chỗ 15 phút đã quá hạn (hoặc khách đổi ngày trên trang checkout):
+      //       => Chạy checkRentalAvailability bắt buộc loại trừ chính đơn hiện tại ({ excludeOrderId: order._id }).
+      const isHoldStillValid =
+        (order.status === RENTAL_ORDER_STATUS.WAITING_PAYMENT ||
+          order.status === RENTAL_ORDER_STATUS.APPROVED) &&
+        (!order.holdExpiresAt || new Date(order.holdExpiresAt) > now);
+
+      if (!isHoldStillValid || datesChanged) {
+        await releaseExpiredOrderHolds();
+
+        // Nếu bắt buộc phải query DB check lịch tại API Checkout (do hết hạn Hold hoặc đổi ngày):
+        // BẮT BUỘC loại trừ _id của đơn hàng hiện tại: { _id: { $ne: order._id } }
+        for (const item of order.items || []) {
+          const pid = item.productId?._id || item.productId;
+          if (pid && mongoose.Types.ObjectId.isValid(pid)) {
+            await checkRentalAvailability(pid, order.startDate, order.endDate, item.quantity || 1, {
+              excludeOrderId: order._id,
+            });
+          }
         }
       }
 
-      // Gia hạn tiếp thời gian giữ chỗ trong phiên thanh toán VNPay
-      if (
-        order.status === RENTAL_ORDER_STATUS.WAITING_PAYMENT ||
-        order.status === RENTAL_ORDER_STATUS.APPROVED ||
-        order.status === RENTAL_ORDER_STATUS.EXPIRED
-      ) {
-        if (order.status === RENTAL_ORDER_STATUS.EXPIRED) {
-          order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
-          order.paymentStatus = "PENDING";
-        }
-        order.holdExpiresAt = new Date(now.getTime() + HOLD_SLOT_DURATION_MS);
-        hasUpdates = true;
+      // (c) Làm mới / gia hạn Temporary Hold Slot 15 phút cho phiên thanh toán VNPay
+      order.status = RENTAL_ORDER_STATUS.WAITING_PAYMENT;
+      if (order.paymentStatus === "EXPIRED") {
+        order.paymentStatus = "PENDING";
       }
+      order.holdExpiresAt = new Date(now.getTime() + HOLD_SLOT_DURATION_MS);
+      hasUpdates = true;
+      await createTemporaryHoldSlotsForOrder(order, order.holdExpiresAt);
 
       if (shippingAddress && shippingAddress.province) {
         order.shippingAddress = {
@@ -368,10 +399,12 @@ const processVnPayIpn = async (queryParams = {}) => {
         bankCode: queryParams.vnp_BankCode || "",
       });
     } else {
-      // AC: Thanh toán thành công -> cập nhật RentalOrder thành PAID
+      // AC: Thanh toán thành công -> cập nhật RentalOrder thành PAID và chốt cố định Hold Slot (expiresAt = null)
       order.status = RENTAL_ORDER_STATUS.PAID;
       order.paymentStatus = "PAID";
+      order.holdExpiresAt = null;
       await order.save();
+      await confirmHoldSlotsForPaidOrder(order);
     }
 
     if (payment) {
@@ -506,7 +539,9 @@ const processVnPayReturn = async (queryParams = {}) => {
       if (order.status !== RENTAL_ORDER_STATUS.PAID) {
         order.status = RENTAL_ORDER_STATUS.PAID;
         order.paymentStatus = "PAID";
+        order.holdExpiresAt = null;
         await order.save();
+        await confirmHoldSlotsForPaidOrder(order);
       }
     }
 

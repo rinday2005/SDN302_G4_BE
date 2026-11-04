@@ -67,6 +67,13 @@ const getAllOrdersController = async (req, res, next) => {
 
 const updateOrderStatusController = async (req, res, next) => {
   try {
+    if (req.body.status === "REJECTED") {
+      const order = await rejectOrder(req.params.id, req.user, {
+        rejectionReason: req.body?.rejectionReason || req.body?.reason,
+      });
+      return successResponse(res, "Order rejected successfully", order);
+    }
+
     const order = await updateOrderStatus(req.params.id, req.body.status, req.user);
 
     return successResponse(res, "Order status updated successfully", order);
@@ -98,6 +105,7 @@ const approveOrderController = async (req, res, next) => {
 const rejectOrderController = async (req, res, next) => {
   try {
     const order = await rejectOrder(req.params.id, req.user, {
+      rejectionReason: req.body?.rejectionReason || req.body?.reason,
       reason: req.body?.reason,
     });
 

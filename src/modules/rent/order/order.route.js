@@ -41,10 +41,12 @@ router.get("/my-orders", getUserOrdersController);
 router.get("/my-rentals", getUserOrdersController);
 
 // Shop Owner phê duyệt đơn thuê -> chuyển sang WAITING_PAYMENT
-router.post("/:id/approve", authorize(["SHOP_OWNER"]), approveOrderController);
+router.post("/:id/approve", authorize(["SHOP_OWNER", "ADMIN"]), approveOrderController);
+router.patch("/:id/approve", authorize(["SHOP_OWNER", "ADMIN"]), approveOrderController);
 
 // Shop Owner từ chối đơn thuê -> chuyển sang REJECTED và giải phóng reservation
-router.post("/:id/reject", authorize(["SHOP_OWNER"]), rejectOrderController);
+router.post("/:id/reject", authorize(["SHOP_OWNER", "ADMIN"]), rejectOrderController);
+router.patch("/:id/reject", authorize(["SHOP_OWNER", "ADMIN"]), rejectOrderController);
 
 // [BE-S3-06] Shop Owner cập nhật thông tin bàn giao vận chuyển
 router.post(
