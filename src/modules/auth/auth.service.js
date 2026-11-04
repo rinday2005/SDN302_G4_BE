@@ -23,7 +23,8 @@ const ensureUserCartAndWishlist = async (userId) => {
 };
 
 const register = async ({ email, password, fullName, phoneNumber, role, shopName, businessAddress, province }) => {
-  const existingUser = await User.findOne({ email });
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  const existingUser = await User.findOne({ email: cleanEmail });
 
   if (existingUser) {
     const error = new Error("Email already exists");
@@ -32,16 +33,9 @@ const register = async ({ email, password, fullName, phoneNumber, role, shopName
     throw error;
   }
 
-  // Enforce single SHOP_OWNER policy in the system
+  // Multi-vendor marketplace: multiple SHOP_OWNER accounts are fully supported
   let assignedRole = "USER";
   if (role === "SHOP_OWNER") {
-    const existingShopOwner = await User.findOne({ role: "SHOP_OWNER" });
-    if (existingShopOwner) {
-      const error = new Error("Shop owner already exists. Only one shop owner is allowed.");
-      error.statusCode = 400;
-      error.errorCode = "SHOP_OWNER_ALREADY_EXISTS";
-      throw error;
-    }
     assignedRole = "SHOP_OWNER";
   } else if (role === "ADMIN") {
     const error = new Error("Cannot register with ADMIN role");
@@ -52,13 +46,40 @@ const register = async ({ email, password, fullName, phoneNumber, role, shopName
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  const user = await User.create({
-    email,
+  const userData = {
+    email: cleanEmail,
     passwordHash,
-    fullName,
-    phoneNumber,
+    fullName: String(fullName || "").trim(),
+    phoneNumber: String(phoneNumber || "").trim(),
     role: assignedRole,
-  });
+  };
+
+  if (assignedRole === "SHOP_OWNER") {
+    const sName = String(shopName || fullName || "").trim() || "Cửa hàng ReUse";
+    const bAddress = String(businessAddress || "").trim();
+    const prov = String(province || "").trim();
+
+    userData.shopProfile = {
+      shopName: sName,
+      businessAddress: bAddress,
+      cityRegion: prov ? `${prov}, Việt Nam` : "Việt Nam",
+      hotline: String(phoneNumber || "").trim(),
+      operatingHours: "08:00 - 20:00 (Thứ 2 - Chủ Nhật)",
+      rating: 5.0,
+      establishedYear: new Date().getFullYear(),
+    };
+
+    if (prov || bAddress) {
+      userData.address = {
+        province: prov,
+        district: "",
+        ward: "",
+        detail: bAddress,
+      };
+    }
+  }
+
+  const user = await User.create(userData);
 
   await ensureUserCartAndWishlist(user._id);
 
@@ -87,8 +108,8 @@ const login = async ({ email, password }) => {
 
   // Fallback when switching databases (e.g., Local MongoDB -> MongoDB Atlas)
   if (!user && normalizedEmail) {
-    if (normalizedEmail.includes("shop") || normalizedEmail.includes("owner")) {
-      user = await User.findOne({ role: "SHOP_OWNER" });
+    if (normalizedEmail === "shop@reuse.vn" || normalizedEmail === "shopowner@reuse.vn") {
+      user = await User.findOne({ email: "shop@reuse.vn" }) || await User.findOne({ role: "SHOP_OWNER" });
     } else if (normalizedEmail.includes("admin")) {
       user = await User.findOne({ role: "ADMIN" });
     }
@@ -101,11 +122,8 @@ const login = async ({ email, password }) => {
       let inferredRole = "USER";
       if (normalizedEmail.includes("admin")) {
         inferredRole = "ADMIN";
-      } else if (normalizedEmail.includes("shop") || normalizedEmail.includes("owner")) {
-        const existingShopOwner = await User.findOne({ role: "SHOP_OWNER" });
-        if (!existingShopOwner) {
-          inferredRole = "SHOP_OWNER";
-        }
+      } else if (normalizedEmail === "shop@reuse.vn" || normalizedEmail === "shopowner@reuse.vn") {
+        inferredRole = "SHOP_OWNER";
       }
 
       const emailPrefix = normalizedEmail.split("@")[0] || "ReUse User";

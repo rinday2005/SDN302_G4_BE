@@ -8,6 +8,16 @@ const thriftListingSchema = new mongoose.Schema(
       required: [true, "ownerId là bắt buộc"],
       index: true,
     },
+    shopId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    shopName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     name: {
       type: String,
       required: [true, "Tên sản phẩm thanh lý không được để trống"],

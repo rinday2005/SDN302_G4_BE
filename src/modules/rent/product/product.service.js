@@ -50,8 +50,18 @@ const sanitizeProductForClient = (product) => {
       .catch(() => {});
   }
 
+  const ownerObj = typeof product.ownerId === "object" && product.ownerId !== null ? product.ownerId : null;
+  const resolvedShopName =
+    product.shopName ||
+    ownerObj?.shopProfile?.shopName ||
+    ownerObj?.fullName ||
+    "ReUse Shop";
+  const resolvedShopId = product.shopId || ownerObj?._id || product.ownerId;
+
   return {
     ...product,
+    shopId: resolvedShopId,
+    shopName: resolvedShopName,
     location: normalizeShopBranch(product.location),
     images: cleanImages.length > 0 ? cleanImages : [FALLBACK_PRODUCT_IMAGE],
   };
@@ -74,6 +84,8 @@ const createProduct = async (productData, ownerId) => {
   const {
     ownerId: ignoredOwnerId,
     status: ignoredStatus,
+    shopId: ignoredShopId,
+    shopName: ignoredShopName,
     ...safeData
   } = productData;
 
@@ -81,9 +93,23 @@ const createProduct = async (productData, ownerId) => {
     safeData.images = await uploadBase64ListToCloudinary(safeData.images);
   }
 
+  const User = (await import("../../user/user.model.js")).default;
+  let shopName = "ReUse Shop";
+  if (ownerId) {
+    const owner = await User.findById(ownerId).select("fullName shopProfile address");
+    if (owner) {
+      shopName = owner.shopProfile?.shopName || owner.fullName || "ReUse Shop";
+      if (!safeData.location && owner.address?.province) {
+        safeData.location = owner.address.province;
+      }
+    }
+  }
+
   const product = await RentalProduct.create({
     ...safeData,
     ownerId,
+    shopId: ownerId,
+    shopName,
     location: normalizeShopBranch(safeData.location),
     status: "PENDING_APPROVAL",
   });
@@ -189,11 +215,15 @@ const getPublicProducts = async (query = {}) => {
     page = 1,
     limit = 12,
     sortBy = "newest",
+    ownerId,
   } = query;
 
   const filter = {
     status: "APPROVED",
   };
+  if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
+    filter.ownerId = new mongoose.Types.ObjectId(ownerId);
+  }
 
   if (size && size !== "ALL" && size !== "all") {
     const s = size.trim().toUpperCase();
@@ -615,12 +645,6 @@ const getShopProducts = async (ownerId) => {
   let products = [];
   if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
     products = await RentalProduct.find({ ownerId })
-      .populate("categoryId", "name slug")
-      .sort({ createdAt: -1 })
-      .lean();
-  }
-  if (products.length === 0) {
-    products = await RentalProduct.find({})
       .populate("categoryId", "name slug")
       .sort({ createdAt: -1 })
       .lean();

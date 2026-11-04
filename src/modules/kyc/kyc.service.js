@@ -281,7 +281,7 @@ export const listKycRecords = async (query = {}) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(numericLimit)
-      .populate("userId", "fullName email phoneNumber role kycStatus avatarUrl dob address kyc"),
+      .populate("userId", "fullName email phoneNumber role kycStatus avatarUrl shopProfile dob address kyc"),
     KycRecord.countDocuments(filter),
   ]);
 

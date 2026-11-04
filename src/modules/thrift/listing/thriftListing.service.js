@@ -52,8 +52,18 @@ const sanitizeThriftForClient = (item) => {
   const rawSizes = Array.isArray(item.sizes) ? item.sizes.filter(Boolean) : [];
   const activeSize = item.size || (rawSizes.length > 0 ? rawSizes[0] : '');
 
+  const ownerObj = typeof item.ownerId === "object" && item.ownerId !== null ? item.ownerId : null;
+  const resolvedShopName =
+    item.shopName ||
+    ownerObj?.shopProfile?.shopName ||
+    ownerObj?.fullName ||
+    "ReUse Shop";
+  const resolvedShopId = item.shopId || ownerObj?._id || item.ownerId;
+
   return {
     ...item,
+    shopId: resolvedShopId,
+    shopName: resolvedShopName,
     location: normalizeShopBranch(item.location),
     images: cleanImages.length > 0 ? cleanImages : [FALLBACK_THRIFT_IMAGE],
     sizes: rawSizes.length > 0 ? rawSizes : (activeSize ? [activeSize] : []),
@@ -83,9 +93,12 @@ export const createListing = async (userId, data) => {
 
   // AC: ownerId không lấy tự do từ body, gán từ req.user.id
   // AC: status mặc định luôn là PENDING_APPROVAL
+  const sName = owner?.shopProfile?.shopName || owner?.fullName || "ReUse Shop";
   const newListing = await ThriftListing.create({
     ...safeData,
     ownerId: userId,
+    shopId: userId,
+    shopName: sName,
     status: "PENDING_APPROVAL",
   });
   return newListing;

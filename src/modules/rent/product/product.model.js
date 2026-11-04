@@ -17,6 +17,16 @@ const rentalProductSchema = new mongoose.Schema(
         message: 'ownerId không hợp lệ hoặc tài khoản không có quyền SHOP_OWNER',
       },
     },
+    shopId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
+    shopName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     name: {
       type: String,
       required: [true, 'Tên sản phẩm là bắt buộc'],

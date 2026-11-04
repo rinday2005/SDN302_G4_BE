@@ -158,10 +158,18 @@ export const checkoutThriftOrder = async ({
   const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
   const orderCode = `TO-${Date.now()}-${randomSuffix}`;
 
+  let thriftShopName = "ReUse Shop";
+  if (firstOwnerId) {
+    const ownerUser = await User.findById(firstOwnerId).select("fullName shopProfile");
+    thriftShopName = ownerUser?.shopProfile?.shopName || ownerUser?.fullName || "ReUse Shop";
+  }
+
   const order = await ThriftOrder.create({
     orderCode,
     buyerId: user._id,
     userId: user._id,
+    shopOwnerId: firstOwnerId,
+    shopName: thriftShopName,
     items: orderItems,
     itemsTotal,
     subtotal: itemsTotal,
@@ -367,20 +375,7 @@ export const getSellerThriftOrders = async (user, { status, page = 1, limit = 50
     ThriftOrder.countDocuments(filter),
   ]);
 
-  // Fallback for SHOP_OWNER testing if no specific listing belongs to their ID
-  if (orders.length === 0 && (isShopOwner || user.role === "USER")) {
-    const fallbackFilter = (status && status !== "ALL") ? { status } : {};
-    const fallbackOrders = await ThriftOrder.find(fallbackFilter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parsedLimit)
-      .populate("buyerId", "fullName email phoneNumber avatarUrl")
-      .populate("items.listingId");
-    if (fallbackOrders.length > 0) {
-      orders = fallbackOrders;
-      total = await ThriftOrder.countDocuments(fallbackFilter);
-    }
-  }
+  // Multi-vendor isolation: return strictly this shop's orders
 
   return {
     orders,
