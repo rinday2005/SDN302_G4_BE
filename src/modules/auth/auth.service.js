@@ -96,59 +96,20 @@ const login = async ({ email, password }) => {
   const normalizedEmail = cleanEmail.toLowerCase();
   const inputPassword = String(password || "").trim();
 
+  if (!cleanEmail || !inputPassword) {
+    const error = new Error("Vui lòng nhập đầy đủ email và mật khẩu");
+    error.statusCode = 400;
+    error.errorCode = "INVALID_CREDENTIALS";
+    throw error;
+  }
+
   let user = await User.findOne({ email: normalizedEmail });
   if (!user && cleanEmail) {
     user = await User.findOne({ email: cleanEmail });
   }
-  if (!user && cleanEmail) {
-    user = await User.findOne({
-      email: { $regex: new RegExp(`^${cleanEmail.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")}$`, "i") },
-    });
-  }
-
-  // Fallback when switching databases (e.g., Local MongoDB -> MongoDB Atlas)
-  if (!user && normalizedEmail) {
-    if (normalizedEmail === "shop@reuse.vn" || normalizedEmail === "shopowner@reuse.vn") {
-      user = await User.findOne({ email: "shop@reuse.vn" }) || await User.findOne({ role: "SHOP_OWNER" });
-    } else if (normalizedEmail.includes("admin")) {
-      user = await User.findOne({ role: "ADMIN" });
-    }
-  }
-
-  // Auto-provision user if logging in with an account from previous local DB that isn't in Atlas yet
-  if (!user && normalizedEmail && inputPassword.length >= 6) {
-    try {
-      const passwordHash = await bcrypt.hash(inputPassword, 10);
-      let inferredRole = "USER";
-      if (normalizedEmail.includes("admin")) {
-        inferredRole = "ADMIN";
-      } else if (normalizedEmail === "shop@reuse.vn" || normalizedEmail === "shopowner@reuse.vn") {
-        inferredRole = "SHOP_OWNER";
-      }
-
-      const emailPrefix = normalizedEmail.split("@")[0] || "ReUse User";
-      const displayFullName =
-        inferredRole === "SHOP_OWNER"
-          ? "ReUse Official Shop"
-          : inferredRole === "ADMIN"
-          ? "System Admin"
-          : emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
-
-      user = await User.create({
-        email: normalizedEmail,
-        passwordHash,
-        fullName: displayFullName,
-        phoneNumber: "0901234567",
-        role: inferredRole,
-        kycStatus: "APPROVED",
-      });
-    } catch {
-      user = await User.findOne({ email: normalizedEmail });
-    }
-  }
 
   if (!user) {
-    const error = new Error("Invalid email or password");
+    const error = new Error("Tài khoản chưa được đăng ký hoặc mật khẩu không chính xác");
     error.statusCode = 401;
     error.errorCode = "INVALID_CREDENTIALS";
     throw error;
@@ -169,34 +130,12 @@ const login = async ({ email, password }) => {
   ) {
     isPasswordCorrect = await bcrypt.compare(inputPassword, hashToCompare);
   } else if (hashToCompare) {
-    // Plain text comparison fallback (for legacy accounts)
+    // Plain text comparison fallback (cho các tài khoản legacy)
     isPasswordCorrect = inputPassword === hashToCompare;
   }
 
-  // Graceful fallback for test/demo/development accounts:
-  const commonDemoPasswords = [
-    "123456",
-    "Password123!",
-    "12345678",
-    "password",
-    "Password123",
-    "admin123",
-    "hon123",
-    "vanhon123",
-    "123123",
-    "123456a@",
-    "12345678a@",
-  ];
-
-  if (
-    !isPasswordCorrect &&
-    (commonDemoPasswords.includes(inputPassword) || inputPassword.length >= 6)
-  ) {
-    isPasswordCorrect = true;
-  }
-
   if (!isPasswordCorrect) {
-    const error = new Error("Invalid email or password");
+    const error = new Error("Tài khoản chưa được đăng ký hoặc mật khẩu không chính xác");
     error.statusCode = 401;
     error.errorCode = "INVALID_CREDENTIALS";
     throw error;
@@ -269,6 +208,8 @@ const login = async ({ email, password }) => {
       avatarUrl: user.avatarUrl || null,
       role: user.role,
       kycStatus: user.kycStatus || null,
+      isKycVerified: user.kycStatus === "APPROVED",
+      shopProfile: user.shopProfile || null,
       address: user.address || null,
     },
   };

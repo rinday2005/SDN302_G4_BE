@@ -75,7 +75,8 @@ const sanitizeThriftForClient = (item) => {
 export const createListing = async (userId, data) => {
   const User = (await import("../../user/user.model.js")).default;
   const owner = await User.findById(userId).select("address shopProfile");
-  const shopLoc = data?.location || owner?.address?.province || owner?.shopProfile?.cityRegion || "Thành phố Đà Nẵng";
+  const ownerLoc = owner?.address?.province || owner?.shopProfile?.cityRegion || owner?.shopProfile?.businessAddress;
+  const shopLoc = ownerLoc || data?.location || "Thành phố Đà Nẵng";
   const safeData = { ...data, location: shopLoc };
   if (Array.isArray(safeData.images)) {
     safeData.images = await uploadBase64ThriftImages(safeData.images);
@@ -143,6 +144,17 @@ export const updateListing = async (listingId, userId, updateData) => {
 export const getPublicListings = async (query = {}) => {
   const filter = { ...query };
   delete filter.includeSold;
+
+  if (query.ownerId) {
+    const oId = mongoose.Types.ObjectId.isValid(query.ownerId) ? new mongoose.Types.ObjectId(query.ownerId) : null;
+    delete filter.ownerId;
+    const ownerConds = [];
+    if (oId) {
+      ownerConds.push({ ownerId: oId }, { shopId: oId }, { sellerId: oId });
+    }
+    ownerConds.push({ ownerId: String(query.ownerId) }, { shopId: String(query.ownerId) });
+    filter.$or = ownerConds;
+  }
 
   if (query.status) {
     if (query.status === "ALL" || query.status === "all") {

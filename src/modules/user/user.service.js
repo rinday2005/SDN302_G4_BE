@@ -19,6 +19,8 @@ export const formatUserResponse = (user) => {
     avatarPublicId: user.avatarPublicId || null,
     role: user.role,
     kycStatus: user.kycStatus || null,
+    isKycVerified: user.kycStatus === "APPROVED",
+    shopProfile: user.shopProfile || null,
     kyc: user.kyc || null,
     address: user.address || null,
     walletBalance: Number(user.walletBalance) || 0,
