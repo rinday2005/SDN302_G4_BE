@@ -79,14 +79,24 @@ const getCart = async (userId) => {
   await getOrCreateCart(userId);
 
   return Cart.findOne({ userId })
-    .populate(
-      "rentItems.productId",
-      "name pricePerDay depositAmount images status totalQuantity ownerId location condition categoryId"
-    )
-    .populate(
-      "thriftItems.productId",
-      "name price condition images status ownerId categoryId location description sourceType"
-    );
+    .populate({
+      path: "rentItems.productId",
+      select:
+        "name pricePerDay depositAmount images status totalQuantity ownerId shopId shopName location condition categoryId",
+      populate: {
+        path: "ownerId",
+        select: "fullName email phoneNumber address avatarUrl role shopProfile kycStatus",
+      },
+    })
+    .populate({
+      path: "thriftItems.productId",
+      select:
+        "name price condition images status ownerId shopId shopName categoryId location description sourceType",
+      populate: {
+        path: "ownerId",
+        select: "fullName email phoneNumber address avatarUrl role shopProfile kycStatus",
+      },
+    });
 };
 
 const addItem = async (userId, { type = "RENT", productId, quantity = 1 }) => {

@@ -4,6 +4,7 @@ import RentalOrder from "../rent/order/order.model.js";
 import ThriftOrder from "../thrift/order/thriftOrder.model.js";
 import RentalProduct from "../rent/product/product.model.js";
 import ThriftListing from "../thrift/listing/thriftListing.model.js";
+import Review from "../review/review.model.js";
 
 /**
  * Lấy thông tin Shop Profile của Shop Owner từ MongoDB
@@ -26,6 +27,55 @@ export const getShopProfileService = async (userId) => {
   }
 
   const shopProfile = user.shopProfile || {};
+
+  // Tính toán số sao trung bình của shop từ các đánh giá thực tế của người dùng
+  const [shopRentProducts, shopThriftListings] = await Promise.all([
+    RentalProduct.find({
+      $or: [{ ownerId: user._id }, { shopId: user._id }],
+      isDeleted: { $ne: true },
+    })
+      .select("_id")
+      .lean(),
+    ThriftListing.find({
+      $or: [{ ownerId: user._id }, { shopId: user._id }],
+      isDeleted: { $ne: true },
+    })
+      .select("_id")
+      .lean(),
+  ]);
+
+  const productIds = [
+    ...shopRentProducts.map((p) => p._id),
+    ...shopThriftListings.map((p) => p._id),
+  ];
+
+  let computedRating = 0;
+  let reviewCount = 0;
+
+  if (productIds.length > 0) {
+    const reviewStats = await Review.aggregate([
+      { $match: { productId: { $in: productIds } } },
+      {
+        $group: {
+          _id: null,
+          avgRating: { $avg: "$rating" },
+          totalReviews: { $sum: 1 },
+        },
+      },
+    ]);
+
+    if (reviewStats.length > 0 && reviewStats[0].totalReviews > 0) {
+      reviewCount = reviewStats[0].totalReviews;
+      computedRating = Number(reviewStats[0].avgRating.toFixed(1));
+    }
+  }
+
+  if (user.shopProfile && user.shopProfile.rating !== computedRating) {
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { "shopProfile.rating": computedRating } }
+    );
+  }
 
   return {
     shopId: user._id,
@@ -61,7 +111,10 @@ export const getShopProfileService = async (userId) => {
     website: shopProfile.website || "",
     returnPolicy: shopProfile.returnPolicy || "Đồng kiểm khi nhận hàng, hoàn cọc trong 24h sau khi hoàn tất kiểm định thiết bị.",
     shippingCommitment: shopProfile.shippingCommitment || "Đóng gói bưu tá chuyên dụng Nanuk chống sốc và niêm phong chì bảo mật.",
-    rating: shopProfile.rating ?? 5.0,
+    rating: computedRating,
+    reviewCount,
+    rentCount: shopRentProducts.length,
+    thriftCount: shopThriftListings.length,
     establishedYear: shopProfile.establishedYear || 2024,
     walletBalance: user.walletBalance || 0,
     kycStatus: user.kycStatus || "NOT_SUBMITTED",
