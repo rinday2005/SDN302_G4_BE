@@ -22,7 +22,7 @@ const ensureUserCartAndWishlist = async (userId) => {
   ]);
 };
 
-const register = async ({ email, password, fullName, phoneNumber, role }) => {
+const register = async ({ email, password, fullName, phoneNumber, role, shopName, businessAddress, province }) => {
   const existingUser = await User.findOne({ email });
 
   if (existingUser) {

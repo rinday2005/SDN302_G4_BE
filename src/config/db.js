@@ -7,6 +7,7 @@ import Wishlist from "../modules/wishlist/wishlist.model.js";
 import RentalProduct from "../modules/rent/product/product.model.js";
 import RentalOrder from "../modules/rent/order/order.model.js";
 import ThriftListing from "../modules/thrift/listing/thriftListing.model.js";
+import KycRecord from "../modules/kyc/kyc.model.js";
 import { normalizeShopBranch, SHOP_BRANCHES, calculateShippingFee } from "../utils/shipping.js";
 
 export const syncUserCartsAndWishlists = async () => {
@@ -56,7 +57,7 @@ const syncLocalUsersAndEnsureDefaults = async () => {
     const defaultPasswordHash = await bcrypt.hash("Password123!", 10);
 
     // 1. Ensure single SHOP_OWNER exists
-    let shopOwner = await User.findOne({ role: "SHOP_OWNER" });
+    let shopOwner = await User.findOne({ email: "shopowner@reuse.vn" }) || await User.findOne({ role: "SHOP_OWNER" });
     if (!shopOwner) {
       shopOwner = await User.findOneAndUpdate(
         { email: "shopowner@reuse.vn" },
@@ -78,6 +79,21 @@ const syncLocalUsersAndEnsureDefaults = async () => {
         },
         { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
       );
+    }
+    if (shopOwner) {
+      const existingKyc = await KycRecord.findOne({ userId: shopOwner._id });
+      if (!existingKyc) {
+        await KycRecord.create({
+          userId: shopOwner._id,
+          fullName: shopOwner.fullName || "ReUse Official Shop",
+          idCardNumber: "048096001234",
+          frontImageUrl: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=500&auto=format&fit=crop&q=80",
+          backImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&auto=format&fit=crop&q=80",
+          dob: "1990-01-15",
+          residentAddress: "Quận 1, TP. Hồ Chí Minh",
+          status: "APPROVED",
+        });
+      }
     }
 
     // 2. Ensure core ADMIN and sample USER accounts exist

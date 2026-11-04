@@ -23,6 +23,14 @@ const requireShopOwner = (req, res, next) => {
     });
   }
 
+  if (req.user.kycStatus !== "APPROVED") {
+    return res.status(403).json({
+      success: false,
+      code: "SHOP_KYC_REQUIRED",
+      message: "Tài khoản Cửa hàng cần hoàn tất xác thực KYC (CCCD) và được phê duyệt trước khi đăng hoặc chỉnh sửa sản phẩm.",
+    });
+  }
+
   next();
 };
 

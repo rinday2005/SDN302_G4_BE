@@ -1,5 +1,6 @@
 import { getAllUsersController, toggleUserStatusController, respondUserAppealController, getAllAppealsController } from "../user/user.controller.js";
 import { Router } from "express";
+import { getAllShopsAdminController, getShopDetailAdminController, reviewShopKycAdminController } from "./admin.controller.js";
 import authMiddleware from "../../middleware/auth.middleware.js";
 import authorize from "../../middleware/role.middleware.js";
 import {
@@ -86,3 +87,11 @@ adminRouter.post("/platform-fee", updatePlatformFeeController);
 adminRouter.post("/fees", updatePlatformFeeController);
 
 export default adminRouter;
+
+// ============================================================================
+// QUẢN LÝ SHOP OWNER (ADMIN)
+// ============================================================================
+adminRouter.get("/shops", getAllShopsAdminController);
+adminRouter.get("/shops/:id", getShopDetailAdminController);
+adminRouter.patch("/shops/:id/kyc", reviewShopKycAdminController);
+adminRouter.post("/shops/:id/kyc", reviewShopKycAdminController);

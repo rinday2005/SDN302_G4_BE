@@ -5,6 +5,7 @@ import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
 import ThriftOrder from "../thrift/order/thriftOrder.model.js";
 import User from "../user/user.model.js";
 import PlatformConfig from "./platformConfig.model.js";
+import KycRecord from "../kyc/kyc.model.js";
 import { sendSystemNotificationSafe } from "../notification/notification.service.js";
 import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 
@@ -37,7 +38,7 @@ export const getPendingListingsService = async ({ type = "ALL", page = 1, limit 
 
   if (type === "ALL" || type.toUpperCase() === "RENT") {
     rentPromise = RentalProduct.find({ status: pendingStatusRent })
-      .populate("ownerId", "fullName email phoneNumber role")
+      .populate("ownerId", "fullName email phoneNumber role kycStatus shopProfile address avatarUrl")
       .populate("categoryId", "name slug")
       .sort({ createdAt: -1 })
       .skip(type === "RENT" ? skip : 0)
@@ -48,7 +49,7 @@ export const getPendingListingsService = async ({ type = "ALL", page = 1, limit 
 
   if (type === "ALL" || type.toUpperCase() === "THRIFT") {
     thriftPromise = ThriftListing.find({ status: pendingStatusThrift })
-      .populate("ownerId", "fullName email phoneNumber role")
+      .populate("ownerId", "fullName email phoneNumber role kycStatus shopProfile address avatarUrl")
       .populate("categoryId", "name slug")
       .sort({ createdAt: -1 })
       .skip(type === "THRIFT" ? skip : 0)
@@ -111,7 +112,7 @@ export const getAllListingsService = async ({ type = "ALL", status, page = 1, li
   if (type === "ALL" || type.toUpperCase() === "RENT") {
     [rentItems, rentTotal] = await Promise.all([
       RentalProduct.find(rentFilter)
-        .populate("ownerId", "fullName email phoneNumber role")
+        .populate("ownerId", "fullName email phoneNumber role kycStatus shopProfile address avatarUrl")
         .populate("categoryId", "name slug")
         .sort({ createdAt: -1 })
         .skip(type === "RENT" ? skip : 0)
@@ -123,7 +124,7 @@ export const getAllListingsService = async ({ type = "ALL", status, page = 1, li
   if (type === "ALL" || type.toUpperCase() === "THRIFT") {
     [thriftItems, thriftTotal] = await Promise.all([
       ThriftListing.find(thriftFilter)
-        .populate("ownerId", "fullName email phoneNumber role")
+        .populate("ownerId", "fullName email phoneNumber role kycStatus shopProfile address avatarUrl")
         .populate("categoryId", "name slug")
         .sort({ createdAt: -1 })
         .skip(type === "THRIFT" ? skip : 0)
@@ -1147,4 +1148,144 @@ export const updatePlatformFeeService = async ({ rentFeePercent, thriftFeePercen
     updatedAt: config.updatedAt,
     updatedBy: adminUser ? { _id: adminUser._id, fullName: adminUser.fullName, email: adminUser.email } : null,
   };
+};
+
+// ============================================================================
+// SHOP OWNER MANAGEMENT (ADMIN)
+// ============================================================================
+
+export const getAllShopsAdminService = async (query = {}) => {
+  const { kycStatus, search, page = 1, limit = 50 } = query;
+  const filter = { role: "SHOP_OWNER" };
+
+  if (kycStatus && kycStatus !== "ALL") {
+    if (kycStatus === "UNVERIFIED") {
+      filter.$or = [{ kycStatus: null }, { kycStatus: "REJECTED" }, { kycStatus: { $exists: false } }];
+    } else {
+      filter.kycStatus = kycStatus;
+    }
+  }
+
+  if (search?.trim()) {
+    const q = search.trim();
+    filter.$or = [
+      { fullName: { $regex: q, $options: "i" } },
+      { email: { $regex: q, $options: "i" } },
+      { phoneNumber: { $regex: q, $options: "i" } },
+      { "shopProfile.shopName": { $regex: q, $options: "i" } },
+    ];
+  }
+
+  const shops = await User.find(filter)
+    .select("-passwordHash")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // Aggregate statistics for each shop
+  const enrichedShops = await Promise.all(
+    shops.map(async (shop) => {
+      const [rentCount, thriftCount, pendingRent, pendingThrift, rentOrders, thriftOrders, kycDoc] = await Promise.all([
+        RentalProduct.countDocuments({ ownerId: shop._id }),
+        ThriftListing.countDocuments({ ownerId: shop._id }),
+        RentalProduct.countDocuments({ ownerId: shop._id, status: { $in: ["PENDING", "PENDING_APPROVAL"] } }),
+        ThriftListing.countDocuments({ ownerId: shop._id, status: { $in: ["PENDING", "PENDING_APPROVAL"] } }),
+        RentalOrder.countDocuments({ shopOwnerId: shop._id, status: "COMPLETED" }),
+        ThriftOrder.countDocuments({ "items.sellerId": shop._id, status: "COMPLETED" }),
+        KycRecord.findOne({ userId: shop._id }).lean(),
+      ]);
+
+      return {
+        ...shop,
+        shopName: shop.shopProfile?.shopName || shop.fullName || "Chưa đặt tên Shop",
+        businessAddress: shop.shopProfile?.businessAddress || shop.address?.detail || "",
+        cityRegion: shop.shopProfile?.cityRegion || shop.address?.province || "Thành phố Đà Nẵng",
+        totalRentProducts: rentCount,
+        totalThriftProducts: thriftCount,
+        totalProducts: rentCount + thriftCount,
+        pendingListingsCount: pendingRent + pendingThrift,
+        completedOrdersCount: rentOrders + thriftOrders,
+        kycRecord: kycDoc || null,
+      };
+    })
+  );
+
+  return enrichedShops;
+};
+
+export const getShopDetailAdminService = async (shopId) => {
+  if (!mongoose.Types.ObjectId.isValid(shopId)) {
+    throw createError("ID cửa hàng không hợp lệ", 400, "INVALID_SHOP_ID");
+  }
+
+  const shop = await User.findById(shopId).select("-passwordHash").lean();
+  if (!shop || shop.role !== "SHOP_OWNER") {
+    throw createError("Không tìm thấy thông tin Shop Owner", 404, "SHOP_NOT_FOUND");
+  }
+
+  const [rentProducts, thriftListings, rentOrders, thriftOrders, kycDoc] = await Promise.all([
+    RentalProduct.find({ ownerId: shop._id }).populate("categoryId", "name").sort({ createdAt: -1 }).lean(),
+    ThriftListing.find({ ownerId: shop._id }).populate("categoryId", "name").sort({ createdAt: -1 }).lean(),
+    RentalOrder.find({ shopOwnerId: shop._id }).populate("renterId", "fullName email").sort({ createdAt: -1 }).limit(10).lean(),
+    ThriftOrder.find({ "items.sellerId": shop._id }).populate("buyerId", "fullName email").sort({ createdAt: -1 }).limit(10).lean(),
+    KycRecord.findOne({ userId: shop._id }).lean(),
+  ]);
+
+  return {
+    shop: {
+      ...shop,
+      shopName: shop.shopProfile?.shopName || shop.fullName,
+      businessAddress: shop.shopProfile?.businessAddress || shop.address?.detail || "",
+      cityRegion: shop.shopProfile?.cityRegion || shop.address?.province || "Thành phố Đà Nẵng",
+    },
+    rentProducts,
+    thriftListings,
+    recentOrders: [...rentOrders, ...thriftOrders],
+    kycRecord: kycDoc || null,
+    stats: {
+      totalRentProducts: rentProducts.length,
+      totalThriftProducts: thriftListings.length,
+      totalOrders: rentOrders.length + thriftOrders.length,
+    },
+  };
+};
+
+export const reviewShopKycAdminService = async (shopId, { status, rejectionReason }) => {
+  if (!mongoose.Types.ObjectId.isValid(shopId)) {
+    throw createError("ID cửa hàng không hợp lệ", 400, "INVALID_SHOP_ID");
+  }
+
+  const shop = await User.findById(shopId);
+  if (!shop || shop.role !== "SHOP_OWNER") {
+    throw createError("Không tìm thấy tài khoản Shop Owner", 404, "SHOP_NOT_FOUND");
+  }
+
+  if (!["APPROVED", "REJECTED"].includes(status)) {
+    throw createError("Trạng thái KYC phải là APPROVED hoặc REJECTED", 400, "INVALID_STATUS");
+  }
+
+  shop.kycStatus = status;
+  if (!shop.kyc) shop.kyc = {};
+  if (status === "APPROVED") {
+    shop.kyc.verifiedAt = new Date();
+    shop.kyc.rejectionReason = "";
+  } else {
+    shop.kyc.rejectionReason = String(rejectionReason || "Hồ sơ không đáp ứng tiêu chuẩn").trim();
+  }
+
+  await shop.save();
+
+  // Send notification to shop owner
+  sendSystemNotificationSafe({
+    userId: shop._id,
+    title: status === "APPROVED" ? "Hồ sơ KYC Cửa hàng được duyệt" : "Hồ sơ KYC Cửa hàng bị từ chối",
+    message:
+      status === "APPROVED"
+        ? "Chúc mừng! Hồ sơ KYC của cửa hàng đã được Admin phê duyệt. Bạn đã có thể đăng sản phẩm lên sàn ReUse Hub."
+        : `Hồ sơ KYC của bạn bị từ chối. Lý do: ${shop.kyc.rejectionReason}`,
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/shop/profile",
+    metadata: { status },
+  });
+
+  return shop;
 };

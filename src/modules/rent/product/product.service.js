@@ -353,7 +353,7 @@ const getPublicProducts = async (query = {}) => {
     RentalProduct.find(filter)
       .populate(
         "ownerId",
-        "fullName email phoneNumber address avatarUrl role"
+        "fullName email phoneNumber address avatarUrl role shopProfile kycStatus"
       )
       .populate(
         "categoryId",
@@ -398,7 +398,7 @@ const getPublicProductDetail = async (productId) => {
   })
     .populate(
       "ownerId",
-      "fullName email phoneNumber address avatarUrl role"
+      "fullName email phoneNumber address avatarUrl role shopProfile kycStatus"
     )
     .populate(
       "categoryId",

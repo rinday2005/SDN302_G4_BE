@@ -1,3 +1,4 @@
+import OrderGroup from "../order/orderGroup.model.js";
 import mongoose from "mongoose";
 import Payment from "./payment.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../rent/order/order.model.js";
@@ -523,3 +524,62 @@ export {
   processVnPayReturn,
 };
 
+
+export const markOrderGroupPaid = async (orderGroup, paymentDetails = {}) => {
+  if (!orderGroup) return;
+  orderGroup.paymentStatus = "PAID";
+  orderGroup.status = "PROCESSING";
+  orderGroup.paidAt = new Date();
+  orderGroup.transactionNo = paymentDetails.transactionNo || "";
+  orderGroup.bankCode = paymentDetails.bankCode || "";
+  await orderGroup.save();
+
+  // Process each child order
+  for (const child of orderGroup.childOrders || []) {
+    try {
+      if (child.orderModel === "RentalOrder") {
+        const rOrder = await RentalOrder.findById(child.orderId);
+        if (rOrder) {
+          rOrder.paymentStatus = "PAID";
+          rOrder.status = RENTAL_ORDER_STATUS.PAID;
+          await rOrder.save();
+          // Notify shop owner
+          sendSystemNotificationSafe({
+            userId: rOrder.shopOwnerId,
+            title: "Đơn thuê mới đã thanh toán",
+            message: `Khách hàng đã thanh toán đơn thuê ${rOrder.orderCode}. Vui lòng chuẩn bị hàng để giao.`,
+            type: NOTIFICATION_TYPE.RENTAL_ORDER,
+            link: `/shop/orders`,
+            metadata: { orderId: rOrder._id, orderCode: rOrder.orderCode },
+          });
+        }
+      } else if (child.orderModel === "ThriftOrder") {
+        await lockAndMarkOrderPaid(child.orderId, paymentDetails);
+        const tOrder = await ThriftOrder.findById(child.orderId);
+        const sellerId = tOrder?.items?.[0]?.sellerId || tOrder?.shopOwnerId;
+        if (sellerId) {
+          sendSystemNotificationSafe({
+            userId: sellerId,
+            title: "Đơn thanh lý mới đã thanh toán",
+            message: `Khách hàng đã thanh toán đơn mua ${tOrder.orderCode}. Vui lòng kiểm tra và gửi hàng.`,
+            type: NOTIFICATION_TYPE.THRIFT_ORDER,
+            link: `/shop/thrift/orders`,
+            metadata: { orderId: tOrder._id, orderCode: tOrder.orderCode },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Child order mark paid error:", err.message);
+    }
+  }
+
+  // Notify customer
+  sendSystemNotificationSafe({
+    userId: orderGroup.customerId,
+    title: "Thanh toán đơn hàng thành công",
+    message: `Đơn hàng ${orderGroup.orderCode} gồm ${orderGroup.childOrders.length} đơn con đã được thanh toán thành công!`,
+    type: NOTIFICATION_TYPE.PAYMENT,
+    link: `/orders`,
+    metadata: { orderGroupId: orderGroup._id, orderCode: orderGroup.orderCode },
+  });
+};

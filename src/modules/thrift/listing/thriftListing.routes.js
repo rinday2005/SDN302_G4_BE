@@ -5,6 +5,27 @@ import authorize from "../../../middleware/role.middleware.js";
 
 const router = express.Router();
 
+// Middleware kiểm tra Shop Owner đã được duyệt KYC
+const requireVerifiedShopOwner = (req, res, next) => {
+  if (!req.user || req.user.role !== "SHOP_OWNER") {
+    return res.status(403).json({
+      success: false,
+      message: "Chỉ Shop Owner mới có quyền thực hiện thao tác này",
+    });
+  }
+
+  if (req.user.kycStatus !== "APPROVED") {
+    return res.status(403).json({
+      success: false,
+      code: "SHOP_KYC_REQUIRED",
+      message: "Tài khoản Cửa hàng cần hoàn tất xác thực KYC (CCCD) và được phê duyệt trước khi tạo hoặc chỉnh sửa bài đăng thanh lý.",
+    });
+  }
+
+  next();
+};
+
+
 // Public: Xem danh sách bài đăng (chỉ lấy status APPROVED)
 router.get("/", thriftController.getPublicThriftListings);
 
@@ -23,28 +44,28 @@ router.get("/:id", thriftController.getThriftListingById);
 router.post(
   "/convert-from-rental",
   authMiddleware,
-  authorize(["SHOP_OWNER"]),
+  requireVerifiedShopOwner,
   thriftController.convertFromRental
 );
 
 router.post(
   "/",
   authMiddleware,
-  authorize(["SHOP_OWNER"]),
+  requireVerifiedShopOwner,
   thriftController.createThriftListing
 );
 
 router.put(
   "/:id",
   authMiddleware,
-  authorize(["SHOP_OWNER"]),
+  requireVerifiedShopOwner,
   thriftController.updateThriftListing
 );
 
 router.delete(
   "/:id",
   authMiddleware,
-  authorize(["SHOP_OWNER"]),
+  requireVerifiedShopOwner,
   thriftController.deleteThriftListing
 );
 
