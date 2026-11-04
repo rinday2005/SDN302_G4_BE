@@ -231,35 +231,50 @@ const getPublicProducts = async (query = {}) => {
   const filter = {
     status: "APPROVED",
   };
-  if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
-    filter.ownerId = new mongoose.Types.ObjectId(ownerId);
+  const andClauses = [];
+
+  if (ownerId) {
+    const oId = mongoose.Types.ObjectId.isValid(ownerId) ? new mongoose.Types.ObjectId(ownerId) : null;
+    const ownerConds = [];
+    if (oId) {
+      ownerConds.push({ ownerId: oId }, { shopId: oId });
+    }
+    ownerConds.push({ ownerId: String(ownerId) }, { shopId: String(ownerId) });
+    andClauses.push({ $or: ownerConds });
   }
 
   if (size && size !== "ALL" && size !== "all") {
     const s = size.trim().toUpperCase();
-    filter.$or = [
-      { size: s },
-      { sizes: s },
-    ];
+    andClauses.push({
+      $or: [
+        { size: s },
+        { sizes: s },
+      ],
+    });
   }
 
   if (keyword?.trim()) {
     const safeKeyword = escapeRegex(keyword.trim());
+    andClauses.push({
+      $or: [
+        {
+          name: {
+            $regex: safeKeyword,
+            $options: "i",
+          },
+        },
+        {
+          description: {
+            $regex: safeKeyword,
+            $options: "i",
+          },
+        },
+      ],
+    });
+  }
 
-    filter.$or = [
-      {
-        name: {
-          $regex: safeKeyword,
-          $options: "i",
-        },
-      },
-      {
-        description: {
-          $regex: safeKeyword,
-          $options: "i",
-        },
-      },
-    ];
+  if (andClauses.length > 0) {
+    filter.$and = andClauses;
   }
 
   if (categoryId) {

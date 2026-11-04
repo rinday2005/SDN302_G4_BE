@@ -145,6 +145,17 @@ export const getPublicListings = async (query = {}) => {
   const filter = { ...query };
   delete filter.includeSold;
 
+  if (query.ownerId) {
+    const oId = mongoose.Types.ObjectId.isValid(query.ownerId) ? new mongoose.Types.ObjectId(query.ownerId) : null;
+    delete filter.ownerId;
+    const ownerConds = [];
+    if (oId) {
+      ownerConds.push({ ownerId: oId }, { shopId: oId }, { sellerId: oId });
+    }
+    ownerConds.push({ ownerId: String(query.ownerId) }, { shopId: String(query.ownerId) });
+    filter.$or = ownerConds;
+  }
+
   if (query.status) {
     if (query.status === "ALL" || query.status === "all") {
       delete filter.status;
