@@ -95,12 +95,14 @@ const createProduct = async (productData, ownerId) => {
 
   const User = (await import("../../user/user.model.js")).default;
   let shopName = "ReUse Shop";
+  let shopLoc = safeData.location;
   if (ownerId) {
     const owner = await User.findById(ownerId).select("fullName shopProfile address");
     if (owner) {
       shopName = owner.shopProfile?.shopName || owner.fullName || "ReUse Shop";
-      if (!safeData.location && owner.address?.province) {
-        safeData.location = owner.address.province;
+      const ownerLoc = owner.address?.province || owner.shopProfile?.cityRegion || owner.shopProfile?.businessAddress;
+      if (ownerLoc) {
+        shopLoc = ownerLoc;
       }
     }
   }
@@ -110,7 +112,9 @@ const createProduct = async (productData, ownerId) => {
     ownerId,
     shopId: ownerId,
     shopName,
-    location: normalizeShopBranch(safeData.location),
+    location: normalizeShopBranch(shopLoc),
+    sizeColor: safeData.sizeColor || safeData.mountSensor || "",
+    mountSensor: safeData.mountSensor || safeData.sizeColor || "",
     status: "PENDING_APPROVAL",
   });
 
@@ -158,6 +162,12 @@ const updateProduct = async (productId, ownerId, updateData) => {
   }
 
   Object.assign(product, safeUpdateData);
+  if (safeUpdateData.mountSensor && !safeUpdateData.sizeColor) {
+    product.sizeColor = safeUpdateData.mountSensor;
+  }
+  if (safeUpdateData.sizeColor && !safeUpdateData.mountSensor) {
+    product.mountSensor = safeUpdateData.sizeColor;
+  }
   if (safeUpdateData.location !== undefined) product.location = normalizeShopBranch(safeUpdateData.location);
 
   await product.save();
@@ -659,4 +669,4 @@ export {
   getPublicProducts,
   getPublicProductDetail,
   getShopProducts,
-};
+};

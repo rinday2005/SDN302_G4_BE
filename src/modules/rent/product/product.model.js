@@ -122,6 +122,16 @@ const rentalProductSchema = new mongoose.Schema(
       type: [String],
       default: ['S', 'M', 'L', 'XL'],
     },
+    sizeColor: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mountSensor: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   {
     timestamps: true, // Tự động sinh createdAt, updatedAt

@@ -75,7 +75,8 @@ const sanitizeThriftForClient = (item) => {
 export const createListing = async (userId, data) => {
   const User = (await import("../../user/user.model.js")).default;
   const owner = await User.findById(userId).select("address shopProfile");
-  const shopLoc = data?.location || owner?.address?.province || owner?.shopProfile?.cityRegion || "Thành phố Đà Nẵng";
+  const ownerLoc = owner?.address?.province || owner?.shopProfile?.cityRegion || owner?.shopProfile?.businessAddress;
+  const shopLoc = ownerLoc || data?.location || "Thành phố Đà Nẵng";
   const safeData = { ...data, location: shopLoc };
   if (Array.isArray(safeData.images)) {
     safeData.images = await uploadBase64ThriftImages(safeData.images);

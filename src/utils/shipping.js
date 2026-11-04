@@ -118,7 +118,7 @@ export const normalizeShopBranch = (rawLocation) => {
   const region = getRegion(rawLocation);
   if (region === "NORTH") return "Hà Nội";
   if (region === "SOUTH") return "TP. Hồ Chí Minh";
-  return "Đà Nẵng";
+  return rawLocation.trim() || "Đà Nẵng";
 };
 
 export { cleanProvinceName, getRegion };
