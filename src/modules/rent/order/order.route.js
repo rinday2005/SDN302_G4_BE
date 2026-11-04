@@ -33,11 +33,12 @@ router.get("/shop", optionalAuthMiddleware, getAllOrdersController);
 // Tất cả API đơn thuê còn lại đều yêu cầu đăng nhập
 router.use(authMiddleware);
 
-// Renter tạo đơn thuê (nhiều sản phẩm RENT của cùng 1 Shop Owner)
-router.post("/", authorize(["USER"]), validateCreateOrder, createOrderController);
+// Renter tạo đơn thuê (hỗ trợ cả USER và SHOP_OWNER khi thuê đồ)
+router.post("/", authorize(["USER", "SHOP_OWNER", "ADMIN"]), validateCreateOrder, createOrderController);
 
 // Renter xem danh sách đơn thuê của mình
 router.get("/my-orders", getUserOrdersController);
+router.get("/my-rentals", getUserOrdersController);
 
 // Shop Owner phê duyệt đơn thuê -> chuyển sang WAITING_PAYMENT
 router.post("/:id/approve", authorize(["SHOP_OWNER"]), approveOrderController);

@@ -12,13 +12,14 @@ import { successResponse } from "../../../utils/response.js";
 export const checkAvailabilityController = async (req, res, next) => {
   try {
     const data = req.method === "GET" ? req.query : req.body;
-    const { productId, startDate, endDate, quantity } = data;
+    const { productId, startDate, endDate, quantity, excludeOrderId, currentOrderId } = data;
 
     const result = await checkRentalAvailability(
       productId,
       startDate,
       endDate,
-      Number(quantity) || 1
+      Number(quantity) || 1,
+      { excludeOrderId: excludeOrderId || currentOrderId || null }
     );
 
     return successResponse(
@@ -38,7 +39,10 @@ export const checkAvailabilityController = async (req, res, next) => {
 export const getProductBookedDatesController = async (req, res, next) => {
   try {
     const { productId } = req.params;
-    const result = await getProductBookedDates(productId);
+    const { excludeOrderId, currentOrderId } = req.query || {};
+    const result = await getProductBookedDates(productId, {
+      excludeOrderId: excludeOrderId || currentOrderId || null,
+    });
 
     return successResponse(
       res,

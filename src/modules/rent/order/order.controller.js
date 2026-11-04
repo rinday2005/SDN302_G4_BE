@@ -22,6 +22,11 @@ const createOrderController = async (req, res, next) => {
       startDate: req.body.startDate,
       endDate: req.body.endDate,
       shippingAddress: req.body.shippingAddress,
+      items: req.body.items,
+      totalAmount: req.body.totalAmount,
+      depositAmount: req.body.depositAmount,
+      rentalFee: req.body.rentalFee,
+      shippingFee: req.body.shippingFee,
     });
 
     return successResponse(res, "Order created successfully", order, 201);
