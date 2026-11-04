@@ -65,7 +65,7 @@ const register = async ({ email, password, fullName, phoneNumber, role, shopName
       cityRegion: prov ? `${prov}, Việt Nam` : "Việt Nam",
       hotline: String(phoneNumber || "").trim(),
       operatingHours: "08:00 - 20:00 (Thứ 2 - Chủ Nhật)",
-      rating: 5.0,
+      rating: 0,
       establishedYear: new Date().getFullYear(),
     };
 

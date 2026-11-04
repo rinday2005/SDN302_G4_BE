@@ -253,6 +253,58 @@ const createReview = async ({
       isVerifiedPurchase: verifiedPurchase,
     });
 
+    // Tự động tính lại điểm đánh giá trung bình của Shop sở hữu sản phẩm này
+    try {
+      const targetProd =
+        resolvedProductType === "THRIFT"
+          ? await ThriftListing.findById(productId).select("ownerId shopId").lean()
+          : await RentalProduct.findById(productId).select("ownerId shopId").lean();
+
+      const ownerId = targetProd?.ownerId || targetProd?.shopId;
+      if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
+        const [rentProds, thriftProds] = await Promise.all([
+          RentalProduct.find({
+            $or: [{ ownerId }, { shopId: ownerId }],
+            isDeleted: { $ne: true },
+          })
+            .select("_id")
+            .lean(),
+          ThriftListing.find({
+            $or: [{ ownerId }, { shopId: ownerId }],
+            isDeleted: { $ne: true },
+          })
+            .select("_id")
+            .lean(),
+        ]);
+        const allShopProdIds = [
+          ...rentProds.map((p) => p._id),
+          ...thriftProds.map((p) => p._id),
+        ];
+        if (allShopProdIds.length > 0) {
+          const stats = await Review.aggregate([
+            { $match: { productId: { $in: allShopProdIds } } },
+            {
+              $group: {
+                _id: null,
+                avgRating: { $avg: "$rating" },
+                totalReviews: { $sum: 1 },
+              },
+            },
+          ]);
+          const newShopRating =
+            stats.length > 0 && stats[0].totalReviews > 0
+              ? Number(stats[0].avgRating.toFixed(1))
+              : 0;
+          await User.updateOne(
+            { _id: ownerId },
+            { $set: { "shopProfile.rating": newShopRating } }
+          );
+        }
+      }
+    } catch {
+      // Không làm gián đoạn luồng tạo đánh giá nếu cập nhật rating shop gặp lỗi
+    }
+
     const populatedReview = await Review.findById(review._id)
       .populate("userId", "fullName avatarUrl email role")
       .lean();

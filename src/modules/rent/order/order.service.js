@@ -43,7 +43,7 @@ const syncOrderShippingAndTotal = (order) => {
           RentalOrder.updateOne(
             { _id: order._id },
             { $set: { shippingFee: expectedShipping, totalAmount: expectedTotal } }
-          ).catch(() => {});
+          ).catch(() => { });
         }
       }
     }
@@ -326,9 +326,15 @@ const getOrderById = async (orderId, user) => {
  */
 const getAllOrders = async (user, { page = 1, limit = 50, status } = {}) => {
   if (!user || (user.role !== "SHOP_OWNER" && user.role !== "ADMIN")) {
-    const error = new Error("Chỉ SHOP_OWNER hoặc ADMIN mới có quyền truy cập");
-    error.statusCode = 403;
-    throw error;
+    return {
+      orders: [],
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total: 0,
+        totalPages: 0,
+      },
+    };
   }
 
   const query = {};

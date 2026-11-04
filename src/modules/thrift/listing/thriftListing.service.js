@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ThriftListing from "./thriftListing.model.js";
 import RentalProduct from "../../rent/product/product.model.js";
 import RentalOrder from "../../rent/order/order.model.js";
