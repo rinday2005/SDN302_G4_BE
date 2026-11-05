@@ -33,7 +33,7 @@ import {
 const DEFAULT_HASH_SECRET = VNPAY_HASH_SECRET || "REUSE_HUB_VNPAY_SECRET_2026";
 const DEFAULT_TMN_CODE = VNPAY_TMN_CODE || "REUSEHUB";
 const DEFAULT_VNP_URL = VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-const DEFAULT_RETURN_URL = VNPAY_RETURN_URL || "http://localhost:5173/payment-return";
+const DEFAULT_RETURN_URL = VNPAY_RETURN_URL || "http://localhost:5000/api/payments/vnpay-return";
 
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
@@ -284,9 +284,11 @@ const createVnPayPaymentUrl = async ({
     });
   }
 
-  // 4. Sinh mã giao dịch duy nhất cho phiên thanh toán
-  const txnRef = `${code}_${Date.now()}`;
-  const description = `Thanh toan don ${type.toLowerCase()} ${code}`;
+  // 4. Sinh mã giao dịch duy nhất cho phiên thanh toán (Timestamp + RandomID, tối đa 34 ký tự, không chứa ký tự đặc biệt)
+  const cleanCode = String(code || `RH${Date.now()}`).replace(/[^a-zA-Z0-9]/g, "").slice(-12);
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const txnRef = `${cleanCode}_${Date.now().toString().slice(-8)}_${randomSuffix}`.slice(0, 34);
+  const description = `Thanh toan don ${type.toLowerCase()} ${cleanCode}`;
 
   // 5. Lưu payment record trạng thái PENDING
   await Payment.create({
@@ -559,7 +561,9 @@ const processVnPayReturn = async (queryParams = {}) => {
       orderId: order._id,
       orderCode: order.orderCode,
       totalAmount: order.totalAmount,
+      txnRef: txnRef || queryParams.vnp_TxnRef || "",
       transactionNo: queryParams.vnp_TransactionNo || "",
+      orderType: isThrift ? "THRIFT" : "RENT",
       status: "PAID",
       message: "Thanh toán thành công",
     };
