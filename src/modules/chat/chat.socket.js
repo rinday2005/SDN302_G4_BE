@@ -180,11 +180,34 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
      */
     socket.on("send_message", async (data, callback) => {
       try {
-        const { conversationId, text, imageUrl } = data || {};
+        const { conversationId, text, imageUrl, token: clientToken } = data || {};
+
+        let senderId = socket.userId;
+        if (clientToken) {
+          try {
+            let t = clientToken;
+            if (typeof t === "string") {
+              t = t.replace(/^"(.*)"$/, "$1").trim();
+              if (t.startsWith("Bearer ")) t = t.slice(7).trim();
+            }
+            const decoded = jwt.verify(t, JWT_SECRET);
+            if (decoded?.id) {
+              senderId = decoded.id.toString();
+              socket.userId = senderId;
+              const freshUser = await User.findById(decoded.id).select("-passwordHash");
+              if (freshUser) {
+                socket.user = freshUser;
+                socket.userRole = freshUser.role;
+              }
+            }
+          } catch (tErr) {
+            console.warn("⚠️ [Socket.IO] Client token verification notice:", tErr.message);
+          }
+        }
 
         const result = await sendMessage({
           conversationId,
-          senderId: socket.userId,
+          senderId,
           text,
           imageUrl,
         });
@@ -205,7 +228,7 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
           const pIdStr = participantId._id
             ? participantId._id.toString()
             : participantId.toString();
-          if (pIdStr !== socket.userId) {
+          if (pIdStr !== senderId) {
             io.to(`user:${pIdStr}`).emit("new_message", messageObj);
           }
         });
