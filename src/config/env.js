@@ -18,4 +18,4 @@ export const VNPAY_TMN_CODE = process.env.VNPAY_TMN_CODE;
 export const VNPAY_HASH_SECRET = process.env.VNPAY_HASH_SECRET;
 export const VNPAY_URL = process.env.VNPAY_URL;
 export const VNPAY_RETURN_URL = process.env.VNPAY_RETURN_URL;
-export const FRONTEND_URL = process.env.FRONTEND_URL;
+export const FRONTEND_URL = (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes("localhost:3000") && !process.env.FRONTEND_URL.includes("127.0.0.1:3000")) ? process.env.FRONTEND_URL : "http://localhost:5173";

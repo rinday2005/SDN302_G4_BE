@@ -9,6 +9,7 @@ import RentalOrder from "../modules/rent/order/order.model.js";
 import ThriftListing from "../modules/thrift/listing/thriftListing.model.js";
 import KycRecord from "../modules/kyc/kyc.model.js";
 import { normalizeShopBranch, SHOP_BRANCHES, calculateShippingFee } from "../utils/shipping.js";
+import { ensureSampleDisputes } from "../modules/dispute/dispute.seed.js";
 
 export const syncUserCartsAndWishlists = async () => {
   const allUsers = await User.find({}).select("_id").lean();
@@ -196,6 +197,9 @@ const connectDB = async () => {
     // Run maintenance & bootstrap in background without delaying server listening
     syncLocalUsersAndEnsureDefaults().catch((err) => {
       console.warn("User bootstrap warning:", err.message);
+    });
+    ensureSampleDisputes().catch((err) => {
+      console.warn("Dispute collection init warning:", err.message);
     });
   } catch (error) {
     console.error("MongoDB connection failed:", error.message);
