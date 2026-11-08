@@ -7,14 +7,20 @@ const router = express.Router();
 
 // Middleware kiểm tra Shop Owner đã được duyệt KYC
 const requireVerifiedShopOwner = (req, res, next) => {
-  if (!req.user || req.user.role !== "SHOP_OWNER") {
+  if (!req.user || (req.user.role !== "SHOP_OWNER" && req.user.role !== "ADMIN")) {
     return res.status(403).json({
       success: false,
       message: "Chỉ Shop Owner mới có quyền thực hiện thao tác này",
     });
   }
 
-  if (req.user.kycStatus !== "APPROVED") {
+  const isApproved =
+    req.user.role === "ADMIN" ||
+    req.user.kycStatus === "APPROVED" ||
+    req.user.kycStatus === "VERIFIED" ||
+    Boolean(req.user.isKycVerified);
+
+  if (!isApproved) {
     return res.status(403).json({
       success: false,
       code: "SHOP_KYC_REQUIRED",

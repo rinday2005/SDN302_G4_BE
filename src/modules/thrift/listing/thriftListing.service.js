@@ -200,6 +200,7 @@ export const convertFromRental = async (userId, data) => {
     name,
     sizes,
     size,
+    status,
   } = data;
 
   if (!rentalProductId) {
@@ -215,78 +216,86 @@ export const convertFromRental = async (userId, data) => {
     throw error;
   }
 
-  // 1. Tìm sản phẩm thuê
-  const rentalProduct = await RentalProduct.findById(rentalProductId);
+  // 1. Tìm sản phẩm thuê linh hoạt (hỗ trợ cả ObjectId, SKU, hoặc ID hiện vật)
+  let rentalProduct = null;
+  if (mongoose.Types.ObjectId.isValid(rentalProductId)) {
+    rentalProduct = await RentalProduct.findById(rentalProductId);
+  }
   if (!rentalProduct) {
-    const error = new Error("Sản phẩm thuê không tồn tại");
-    error.statusCode = 404;
-    throw error;
+    rentalProduct = await RentalProduct.findOne({ sku: rentalProductId });
+  }
+  if (!rentalProduct && typeof rentalProductId === "string") {
+    const parts = rentalProductId.split("-");
+    if (parts.length >= 2) {
+      const fragment = parts[1];
+      rentalProduct = await RentalProduct.findOne({
+        $or: [
+          { sku: { $regex: fragment, $options: "i" } },
+          { name: { $regex: fragment, $options: "i" } },
+        ],
+      });
+    }
   }
 
-  // 2. Xác minh sản phẩm thuộc quyền sở hữu của Shop Owner đang đăng nhập
-  if (rentalProduct.ownerId.toString() !== userId.toString()) {
-    const error = new Error("Bạn không có quyền chuyển đổi sản phẩm này");
-    error.statusCode = 403;
-    throw error;
+  let resolvedOwnerId = userId;
+  let resolvedShopId = userId;
+  let resolvedShopName = "ReUse Shop";
+  let resolvedSourceProductId = null;
+
+  if (rentalProduct) {
+    // 2. Xác minh sản phẩm thuộc quyền sở hữu của Shop Owner đang đăng nhập (hoặc Admin)
+    const User = (await import("../../user/user.model.js")).default;
+    const currentUser = await User.findById(userId).select("role");
+    const isAdmin = currentUser?.role === "ADMIN";
+
+    if (!isAdmin && rentalProduct.ownerId && rentalProduct.ownerId.toString() !== userId.toString()) {
+      const error = new Error("Bạn không có quyền chuyển đổi sản phẩm này");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    resolvedOwnerId = rentalProduct.ownerId || userId;
+    resolvedShopId = rentalProduct.shopId || resolvedOwnerId;
+    resolvedShopName = rentalProduct.shopName || "ReUse Shop";
+    resolvedSourceProductId = rentalProduct._id;
+
+    // 3. Quản lý số lượng kho cho thuê: nếu còn nhiều chiếc thì trừ 1, nếu chiếc cuối cùng thì ẩn khỏi RENT
+    if (rentalProduct.totalQuantity && rentalProduct.totalQuantity > 1) {
+      rentalProduct.totalQuantity -= 1;
+    } else {
+      rentalProduct.status = "HIDDEN";
+    }
+    await rentalProduct.save();
   }
 
-  // 3. Kiểm tra sản phẩm có đang bị ẩn hay đã được chuyển đổi
-  if (rentalProduct.status === "HIDDEN") {
-    const error = new Error("Sản phẩm này đã ở trạng thái HIDDEN hoặc đã được chuyển đổi trước đó");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // 4. Kiểm tra có RentalOrder active hoặc booking tương lai không
-  const activeOrder = await RentalOrder.findOne({
-    "items.productId": rentalProductId,
-    status: { $nin: ["COMPLETED", "CANCELLED", "REJECTED"] },
-  });
-  if (activeOrder) {
-    const error = new Error("Không thể chuyển đổi: Sản phẩm đang có đơn thuê đang xử lý/hoạt động hoặc có lịch đặt trước trong tương lai");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // 5. Kiểm tra có đang trong lịch bảo trì (RentalAvailability) không
-  const maintenance = await RentalAvailability.findOne({
-    productId: rentalProductId,
-    endDate: { $gte: new Date() },
-  });
-  if (maintenance) {
-    const error = new Error("Không thể chuyển đổi: Sản phẩm đang trong lịch bảo trì hoặc bị tạm khóa");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // 6. Đặt RENT product thành HIDDEN để không còn xuất hiện trên marketplace RENT
-  rentalProduct.status = "HIDDEN";
-  await rentalProduct.save();
-
-  // 7. Tạo THRIFT listing mới với sourceType = RENTAL_PRODUCT
+  // 4. Tạo THRIFT listing mới với sourceType = RENTAL_PRODUCT và status = PENDING_APPROVAL
   const thriftImages = Array.isArray(images) && images.length > 0
     ? images
-    : rentalProduct.images;
+    : (rentalProduct?.images || [FALLBACK_THRIFT_IMAGE]);
 
   const resolvedSizes = Array.isArray(sizes) && sizes.length > 0
     ? sizes
-    : (rentalProduct.sizes || []);
-  const resolvedSize = size || (resolvedSizes.length > 0 ? resolvedSizes[0] : (rentalProduct.size || ''));
+    : (rentalProduct?.sizes || []);
+  const resolvedSize = size || (resolvedSizes.length > 0 ? resolvedSizes[0] : (rentalProduct?.size || ''));
+
+  const initialStatus = status || "PENDING_APPROVAL";
 
   const newListing = await ThriftListing.create({
-    ownerId: userId,
-    name: name || rentalProduct.name,
-    description: conditionDescription || description || rentalProduct.description || "",
+    ownerId: resolvedOwnerId,
+    shopId: resolvedShopId,
+    shopName: resolvedShopName,
+    name: name || rentalProduct?.name || "Sản phẩm chuyển đổi từ kho RENT",
+    description: conditionDescription || description || rentalProduct?.description || "",
     price: Number(finalSellingPrice),
-    condition: condition || rentalProduct.condition || "GOOD",
+    condition: condition || rentalProduct?.condition || "GOOD",
     images: thriftImages,
     sizes: resolvedSizes,
     size: resolvedSize,
-    categoryId: categoryId || rentalProduct.categoryId,
-    location: normalizeShopBranch(location || rentalProduct.location),
-    status: "APPROVED",
+    categoryId: categoryId || rentalProduct?.categoryId,
+    location: normalizeShopBranch(location || rentalProduct?.location),
+    status: initialStatus,
     sourceType: "RENTAL_PRODUCT",
-    sourceRentalProductId: rentalProduct._id,
+    sourceRentalProductId: resolvedSourceProductId,
   });
 
   return newListing;
