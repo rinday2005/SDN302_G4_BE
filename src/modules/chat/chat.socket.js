@@ -222,7 +222,7 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
         });
 
         if (typeof callback === "function") {
-          callback({ success: true, data: messageObj });
+          callback({ success: true, data: messageObj, message: messageObj });
         }
       } catch (err) {
         const res = {
