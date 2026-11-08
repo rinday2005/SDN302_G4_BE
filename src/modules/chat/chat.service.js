@@ -18,44 +18,62 @@ export const getShopOwner = async () => {
 };
 
 /**
- * Lấy hoặc tạo cuộc trò chuyện giữa User và Shop Owner duy nhất
- * Đảm bảo: Vì hệ thống chỉ có một Shop Owner, mỗi User chỉ có thể chat với Shop Owner duy nhất.
+ * Lấy hoặc tạo cuộc trò chuyện giữa User và Shop Owner cụ thể
+ * Hỗ trợ hệ thống đa Shop (multi-vendor): User chat với shop nào thì shop đó nhận được
  */
-export const getOrCreateConversationForUser = async (
+export const getOrCreateConversationForUser = async ({
   userId,
+  shopId = null,
   serviceType = "RENT",
   orderCode = "",
-  orderTitle = ""
-) => {
-  const shopOwner = await getShopOwner();
+  orderTitle = "",
+}) => {
+  let targetShopOwner = null;
 
-  if (shopOwner._id.toString() === userId.toString()) {
+  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
+    targetShopOwner = await User.findById(shopId);
+  }
+
+  // Nếu không truyền shopId hoặc không tìm thấy, lấy shop owner đầu tiên
+  if (!targetShopOwner) {
+    targetShopOwner = await User.findOne({ role: "SHOP_OWNER" });
+  }
+
+  if (!targetShopOwner) {
+    const error = new Error("Shop Owner account is not configured in the system");
+    error.statusCode = 404;
+    error.errorCode = "SHOP_OWNER_NOT_FOUND";
+    throw error;
+  }
+
+  if (targetShopOwner._id.toString() === userId.toString()) {
     const error = new Error("Shop Owner cannot initiate conversation with self");
     error.statusCode = 400;
     error.errorCode = "SELF_CONVERSATION_NOT_ALLOWED";
     throw error;
   }
 
-  // Tìm cuộc trò chuyện sẵn có giữa User và Shop Owner (hợp nhất 1 kênh liên lạc duy nhất)
+  // Tìm cuộc trò chuyện giữa userId và targetShopOwner cụ thể này
   let conversation = await Conversation.findOne({
-    participants: { $all: [userId, shopOwner._id], $size: 2 },
+    participants: { $all: [userId, targetShopOwner._id], $size: 2 },
   })
     .sort({ updatedAt: -1 })
-    .populate("participants", "fullName email avatarUrl role")
+    .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   if (!conversation) {
     const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
+    const shopDisplayName = targetShopOwner.shopProfile?.shopName || targetShopOwner.fullName || "Shop";
     const newConv = await Conversation.create({
-      participants: [userId, shopOwner._id],
+      participants: [userId, targetShopOwner._id],
       serviceType: validServiceType,
       orderCode: orderCode || "",
-      orderTitle: orderTitle || "Tư vấn & Trò chuyện cùng Atelier",
+      orderTitle: orderTitle || `Trò chuyện cùng ${shopDisplayName}`,
       lastMessage: null,
     });
 
     conversation = await Conversation.findById(newConv._id)
-      .populate("participants", "fullName email avatarUrl role")
+      .populate("participants", "fullName email avatarUrl role shopProfile")
       .populate("lastMessage.senderId", "fullName avatarUrl role");
   }
 
@@ -74,7 +92,7 @@ export const getUserConversations = async (currentUser) => {
 
   const conversations = await Conversation.find(query)
     .sort({ updatedAt: -1 })
-    .populate("participants", "fullName email avatarUrl role")
+    .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   return conversations;
@@ -93,7 +111,7 @@ export const getConversationById = async (conversationId, currentUser) => {
   }
 
   const conversation = await Conversation.findById(conversationId)
-    .populate("participants", "fullName email avatarUrl role")
+    .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   if (!conversation) {

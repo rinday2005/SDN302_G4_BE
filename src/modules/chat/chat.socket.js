@@ -210,12 +210,7 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
           }
         });
 
-        // 3. Nếu người gửi là User, gửi trực tiếp tới tất cả socket của Shop Owner
-        if (socket.userRole !== "SHOP_OWNER") {
-          io.to("role:SHOP_OWNER").emit("new_message", messageObj);
-        }
-
-        // 4. Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
+        // 3. Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
         result.conversation.participants.forEach((participantId) => {
           const pIdStr = participantId._id
             ? participantId._id.toString()

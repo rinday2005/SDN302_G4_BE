@@ -16,6 +16,7 @@ import { getIO } from "./chat.socket.js";
 export const getMyConversation = async (req, res, next) => {
   try {
     const user = req.user;
+    const shopId = req.query.shopId || req.query.shopOwnerId || req.query.ownerId || req.query.partnerId;
     const serviceType = req.query.serviceType === "THRIFT" ? "THRIFT" : "RENT";
     const orderCode = req.query.orderCode || "";
     const orderTitle = req.query.orderTitle || "";
@@ -29,12 +30,13 @@ export const getMyConversation = async (req, res, next) => {
       );
     }
 
-    const conversation = await getOrCreateConversationForUser(
-      user._id,
+    const conversation = await getOrCreateConversationForUser({
+      userId: user._id,
+      shopId,
       serviceType,
       orderCode,
-      orderTitle
-    );
+      orderTitle,
+    });
     return successResponse(
       res,
       "Conversation with Shop Owner retrieved successfully",
