@@ -1,3 +1,5 @@
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 import cloudinary from "../../config/cloudinary.js";
 import mongoose from "mongoose";
 import KycRecord, { KYC_STATUS } from "./kyc.model.js";
@@ -97,6 +99,15 @@ export const submitKycApplication = async (userId, data = {}) => {
   user.kyc.rejectionReason = null;
   await user.save();
 
+  // Bắn thông báo realtime tới toàn bộ Admin
+  notifyAdminsSafe({
+    title: "Hồ sơ KYC mới cần phê duyệt",
+    message: `Người dùng ${user.fullName || user.email} đã nộp hồ sơ KYC căn cước công dân.`,
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/admin/kyc",
+    metadata: { userId: user._id, kycRecordId: kycRecord._id },
+  });
+
   return kycRecord;
 };
 
@@ -184,6 +195,19 @@ export const reviewKycApplication = async (recordId, { status, rejectionReason }
 
     // Role is preserved exactly as is!
     await user.save();
+
+    // Bắn thông báo kết quả duyệt KYC tới User
+    sendSystemNotificationSafe({
+      userId: user._id,
+      title: status === KYC_STATUS.APPROVED ? "Xác thực KYC thành công" : "Hồ sơ KYC chưa được phê duyệt",
+      message:
+        status === KYC_STATUS.APPROVED
+          ? "Hồ sơ định danh căn cước của bạn đã được Admin phê duyệt. Hạn mức thuê đã được mở rộng lên Tier 2."
+          : `Hồ sơ KYC bị từ chối.${rejectionReason ? ` Lý do: ${rejectionReason}` : ""}`,
+      type: NOTIFICATION_TYPE.KYC,
+      link: "/profile",
+      metadata: { status, rejectionReason },
+    });
   }
 
   return kycRecord;
