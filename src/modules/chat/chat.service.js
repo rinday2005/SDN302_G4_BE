@@ -21,7 +21,12 @@ export const getShopOwner = async () => {
  * Lấy hoặc tạo cuộc trò chuyện giữa User và Shop Owner duy nhất
  * Đảm bảo: Vì hệ thống chỉ có một Shop Owner, mỗi User chỉ có thể chat với Shop Owner duy nhất.
  */
-export const getOrCreateConversationForUser = async (userId) => {
+export const getOrCreateConversationForUser = async (
+  userId,
+  serviceType = "RENT",
+  orderCode = "",
+  orderTitle = ""
+) => {
   const shopOwner = await getShopOwner();
 
   if (shopOwner._id.toString() === userId.toString()) {
@@ -31,8 +36,11 @@ export const getOrCreateConversationForUser = async (userId) => {
     throw error;
   }
 
+  const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
+
   let conversation = await Conversation.findOne({
     participants: { $all: [userId, shopOwner._id], $size: 2 },
+    serviceType: validServiceType,
   })
     .populate("participants", "fullName email avatarUrl role")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
@@ -40,6 +48,9 @@ export const getOrCreateConversationForUser = async (userId) => {
   if (!conversation) {
     const newConv = await Conversation.create({
       participants: [userId, shopOwner._id],
+      serviceType: validServiceType,
+      orderCode: orderCode || "",
+      orderTitle: orderTitle || (validServiceType === "THRIFT" ? "Hỏi mua hiện vật THRIFT" : "Tư vấn thiết bị RENT"),
       lastMessage: null,
     });
 
@@ -209,4 +220,34 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
     message: populatedMessage,
     conversation,
   };
+};
+
+/**
+ * Xóa một cuộc trò chuyện và toàn bộ tin nhắn liên quan
+ */
+export const deleteConversationService = async (conversationId, user) => {
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    const error = new Error("Conversation not found");
+    error.statusCode = 404;
+    error.errorCode = "CONVERSATION_NOT_FOUND";
+    throw error;
+  }
+
+  const userIdStr = user._id ? user._id.toString() : user.id;
+  const isParticipant = conversation.participants.some(
+    (p) => (p._id ? p._id.toString() : p.toString()) === userIdStr
+  );
+
+  if (!isParticipant && user.role !== "ADMIN" && user.role !== "SHOP_OWNER") {
+    const error = new Error("Forbidden: You do not have permission to delete this conversation");
+    error.statusCode = 403;
+    error.errorCode = "FORBIDDEN";
+    throw error;
+  }
+
+  await Message.deleteMany({ conversationId });
+  await Conversation.findByIdAndDelete(conversationId);
+
+  return { conversationId };
 };

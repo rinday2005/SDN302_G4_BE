@@ -6,6 +6,7 @@ import {
   getConversationById,
   getMessages,
   sendMessageHttp,
+  deleteConversation,
 } from "./chat.controller.js";
 import {
   validateConversationIdParam,
@@ -39,6 +40,13 @@ router.post(
   validateConversationIdParam,
   validateSendMessage,
   sendMessageHttp
+);
+
+// Xóa conversation
+router.delete(
+  "/conversations/:id",
+  validateConversationIdParam,
+  deleteConversation
 );
 
 export default router;

@@ -5,6 +5,7 @@ import {
   getConversationById as getConvByIdService,
   getMessagesByConversationId,
   sendMessage as sendMessageService,
+  deleteConversationService,
 } from "./chat.service.js";
 import { getIO } from "./chat.socket.js";
 
@@ -15,6 +16,9 @@ import { getIO } from "./chat.socket.js";
 export const getMyConversation = async (req, res, next) => {
   try {
     const user = req.user;
+    const serviceType = req.query.serviceType === "THRIFT" ? "THRIFT" : "RENT";
+    const orderCode = req.query.orderCode || "";
+    const orderTitle = req.query.orderTitle || "";
 
     if (user.role === "SHOP_OWNER") {
       const conversations = await getUserConversations(user);
@@ -25,7 +29,12 @@ export const getMyConversation = async (req, res, next) => {
       );
     }
 
-    const conversation = await getOrCreateConversationForUser(user._id);
+    const conversation = await getOrCreateConversationForUser(
+      user._id,
+      serviceType,
+      orderCode,
+      orderTitle
+    );
     return successResponse(
       res,
       "Conversation with Shop Owner retrieved successfully",
@@ -113,15 +122,22 @@ export const sendMessageHttp = async (req, res, next) => {
 
     const io = getIO();
     if (io) {
-      io.to(conversationId.toString()).emit("new_message", result.message);
-      io.to(conversationId.toString()).emit("receive_message", result.message);
+      const messageObj = result.message.toObject
+        ? result.message.toObject()
+        : { ...result.message };
+      messageObj.serviceType = result.conversation.serviceType || "RENT";
+
+      io.to(conversationId.toString()).emit("new_message", messageObj);
 
       result.conversation.participants.forEach((pId) => {
-        io.to(`user:${pId.toString()}`).emit(
+        const pIdStr = pId._id ? pId._id.toString() : pId.toString();
+        io.to(`user:${pIdStr}`).emit("new_message", messageObj);
+        io.to(`user:${pIdStr}`).emit(
           "conversation_updated",
           result.conversation
         );
       });
+      io.to("role:SHOP_OWNER").emit("new_message", messageObj);
     }
 
     return successResponse(
@@ -130,6 +146,32 @@ export const sendMessageHttp = async (req, res, next) => {
       result.message,
       201
     );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Xóa một cuộc trò chuyện
+ * DELETE /api/chat/conversations/:id
+ */
+export const deleteConversation = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await deleteConversationService(id, req.user);
+
+    // Phát sự kiện Socket.IO để cả 2 bên cùng xóa hội thoại trên UI lập tức
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(id.toString()).emit("conversation_deleted", { conversationId: id });
+        io.emit("conversation_deleted", { conversationId: id });
+      }
+    } catch (socketErr) {
+      console.warn("Could not emit conversation_deleted event:", socketErr.message);
+    }
+
+    return successResponse(res, "Cuộc trò chuyện đã được xóa thành công", result);
   } catch (error) {
     next(error);
   }

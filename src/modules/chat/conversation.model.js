@@ -9,6 +9,22 @@ const conversationSchema = new mongoose.Schema(
         required: true,
       },
     ],
+    serviceType: {
+      type: String,
+      enum: ["RENT", "THRIFT"],
+      default: "RENT",
+      index: true,
+    },
+    orderCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    orderTitle: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     lastMessage: {
       text: {
         type: String,

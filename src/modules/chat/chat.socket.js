@@ -25,8 +25,11 @@ export const socketAuthMiddleware = async (socket, next) => {
       return next(error);
     }
 
-    if (typeof token === "string" && token.startsWith("Bearer ")) {
-      token = token.slice(7).trim();
+    if (typeof token === "string") {
+      token = token.replace(/^"(.*)"$/, "$1").trim();
+      if (token.startsWith("Bearer ")) {
+        token = token.slice(7).trim();
+      }
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -41,6 +44,8 @@ export const socketAuthMiddleware = async (socket, next) => {
     socket.user = user;
     socket.userId = user._id.toString();
     socket.userRole = user.role;
+
+    console.log(`🟢 [Socket.IO] Authenticated socket ${socket.id} for user ${user.email} (${user.role})`);
 
     return next();
   } catch (err) {
@@ -76,6 +81,9 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
   io.on("connection", (socket) => {
     // Tự động join room cá nhân để nhận thông báo real-time theo user ID
     socket.join(`user:${socket.userId}`);
+    if (socket.userRole === "SHOP_OWNER") {
+      socket.join("role:SHOP_OWNER");
+    }
 
     /**
      * AC: Chỉ participant mới join được room; User không thể đọc conversation của User khác
@@ -181,20 +189,45 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
           imageUrl,
         });
 
-        // Broadcast tin nhắn tới tất cả thành viên đang ở trong room conversationId
-        io.to(conversationId.toString()).emit("new_message", result.message);
-        io.to(conversationId.toString()).emit("receive_message", result.message);
+        const messageObj = result.message.toObject
+          ? result.message.toObject()
+          : { ...result.message };
+        messageObj.serviceType = result.conversation.serviceType || "RENT";
+        if (data?.clientMsgId) {
+          messageObj.clientMsgId = data.clientMsgId;
+        }
 
-        // Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
+        // 1. Broadcast tin nhắn tới các thành viên khác trong room conversationId
+        socket.to(conversationId.toString()).emit("new_message", messageObj);
+
+        // 2. Broadcast tin nhắn tới room cá nhân của từng participant (để nhận tin khi đứng ở trang bất kỳ)
         result.conversation.participants.forEach((participantId) => {
-          io.to(`user:${participantId.toString()}`).emit(
+          const pIdStr = participantId._id
+            ? participantId._id.toString()
+            : participantId.toString();
+          if (pIdStr !== socket.userId) {
+            io.to(`user:${pIdStr}`).emit("new_message", messageObj);
+          }
+        });
+
+        // 3. Nếu người gửi là User, gửi trực tiếp tới tất cả socket của Shop Owner
+        if (socket.userRole !== "SHOP_OWNER") {
+          io.to("role:SHOP_OWNER").emit("new_message", messageObj);
+        }
+
+        // 4. Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
+        result.conversation.participants.forEach((participantId) => {
+          const pIdStr = participantId._id
+            ? participantId._id.toString()
+            : participantId.toString();
+          io.to(`user:${pIdStr}`).emit(
             "conversation_updated",
             result.conversation
           );
         });
 
         if (typeof callback === "function") {
-          callback({ success: true, data: result.message });
+          callback({ success: true, data: messageObj });
         }
       } catch (err) {
         const res = {
