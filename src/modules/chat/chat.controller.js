@@ -87,11 +87,11 @@ export const getConversationById = async (req, res, next) => {
  */
 export const getMessages = async (req, res, next) => {
   try {
-    const { page, limit } = req.query;
+    const { page, limit, serviceType } = req.query;
     const result = await getMessagesByConversationId(
       req.params.id,
       req.user,
-      { page, limit }
+      { page, limit, serviceType }
     );
 
     return successResponse(
@@ -112,7 +112,7 @@ export const getMessages = async (req, res, next) => {
  */
 export const sendMessageHttp = async (req, res, next) => {
   try {
-    const { text, imageUrl } = req.body;
+    const { text, imageUrl, serviceType } = req.body;
     const conversationId = req.params.id;
 
     const result = await sendMessageService({
@@ -120,6 +120,7 @@ export const sendMessageHttp = async (req, res, next) => {
       senderId: req.user._id,
       text,
       imageUrl,
+      serviceType,
     });
 
     const io = getIO();

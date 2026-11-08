@@ -17,9 +17,12 @@ export const getShopOwner = async () => {
   return shopOwner;
 };
 
+const resolveRawId = (id) => (typeof id === "string" ? id.replace(/_(RENT|THRIFT)$/, "") : id);
+
 /**
  * Lấy hoặc tạo cuộc trò chuyện giữa User và Shop Owner cụ thể
  * Hỗ trợ hệ thống đa Shop (multi-vendor): User chat với shop nào thì shop đó nhận được
+ * Lưu ý: Giữa một User và một Shop Owner chỉ có DUY NHẤT 1 cuộc trò chuyện (User nhắn chung)
  */
 export const getOrCreateConversationForUser = async ({
   userId,
@@ -53,18 +56,16 @@ export const getOrCreateConversationForUser = async ({
     throw error;
   }
 
-  const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
-
-  // Tìm cuộc trò chuyện giữa userId và targetShopOwner cụ thể này theo đúng serviceType (RENT hoặc THRIFT)
+  // 1 cuộc trò chuyện duy nhất giữa User và Shop Owner này
   let conversation = await Conversation.findOne({
     participants: { $all: [userId, targetShopOwner._id], $size: 2 },
-    serviceType: validServiceType,
   })
     .sort({ updatedAt: -1 })
     .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   if (!conversation) {
+    const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
     const shopDisplayName = targetShopOwner.shopProfile?.shopName || targetShopOwner.fullName || "Shop";
     const newConv = await Conversation.create({
       participants: [userId, targetShopOwner._id],
@@ -84,8 +85,8 @@ export const getOrCreateConversationForUser = async ({
 
 /**
  * Lấy danh sách conversation của người dùng hiện tại
- * - USER: Chỉ thấy conversation của chính mình với Shop Owner
- * - SHOP_OWNER: Thấy danh sách tất cả các cuộc trò chuyện của khách hàng với Shop
+ * - USER: Mỗi Shop chỉ thấy 1 cuộc trò chuyện duy nhất (nhắn chung liền mạch)
+ * - SHOP_OWNER: Tự động tách thành 2 luồng RENT và THRIFT theo tin nhắn của khách
  */
 export const getUserConversations = async (currentUser) => {
   const query = {
@@ -97,7 +98,67 @@ export const getUserConversations = async (currentUser) => {
     .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
-  return conversations;
+  // Đối với USER: Trả về danh sách bình thường (mỗi Shop 1 cuộc trò chuyện duy nhất)
+  if (currentUser.role === "USER") {
+    return conversations;
+  }
+
+  // Đối với SHOP_OWNER: Tách các hội thoại theo mảng dịch vụ RENT và THRIFT
+  const shopConversations = [];
+
+  for (const conv of conversations) {
+    const [latestRentMsg, latestThriftMsg] = await Promise.all([
+      Message.findOne({
+        conversationId: conv._id,
+        $or: [{ serviceType: "RENT" }, { serviceType: { $exists: false } }, { serviceType: null }],
+      })
+        .sort({ createdAt: -1 })
+        .populate("senderId", "fullName avatarUrl role"),
+      Message.findOne({ conversationId: conv._id, serviceType: "THRIFT" })
+        .sort({ createdAt: -1 })
+        .populate("senderId", "fullName avatarUrl role"),
+    ]);
+
+    // Luồng RENT: Nếu có tin nhắn RENT hoặc cuộc trò chuyện mới chưa có tin nhắn nào
+    if (latestRentMsg || (!latestRentMsg && !latestThriftMsg)) {
+      const rentConv = conv.toObject ? conv.toObject() : { ...conv };
+      rentConv._id = `${conv._id}_RENT`;
+      rentConv.rawConversationId = conv._id.toString();
+      rentConv.serviceType = "RENT";
+      if (latestRentMsg) {
+        rentConv.lastMessage = {
+          text: latestRentMsg.text || (latestRentMsg.imageUrl ? "[Hình ảnh]" : ""),
+          senderId: latestRentMsg.senderId,
+          imageUrl: latestRentMsg.imageUrl,
+          serviceType: "RENT",
+          createdAt: latestRentMsg.createdAt,
+        };
+        rentConv.updatedAt = latestRentMsg.createdAt;
+      }
+      shopConversations.push(rentConv);
+    }
+
+    // Luồng THRIFT: Nếu có tin nhắn THRIFT
+    if (latestThriftMsg) {
+      const thriftConv = conv.toObject ? conv.toObject() : { ...conv };
+      thriftConv._id = `${conv._id}_THRIFT`;
+      thriftConv.rawConversationId = conv._id.toString();
+      thriftConv.serviceType = "THRIFT";
+      thriftConv.lastMessage = {
+        text: latestThriftMsg.text || (latestThriftMsg.imageUrl ? "[Hình ảnh]" : ""),
+        senderId: latestThriftMsg.senderId,
+        imageUrl: latestThriftMsg.imageUrl,
+        serviceType: "THRIFT",
+        createdAt: latestThriftMsg.createdAt,
+      };
+      thriftConv.updatedAt = latestThriftMsg.createdAt;
+      shopConversations.push(thriftConv);
+    }
+  }
+
+  return shopConversations.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
 };
 
 /**
@@ -105,14 +166,15 @@ export const getUserConversations = async (currentUser) => {
  * AC: Chỉ participant mới có quyền xem conversation
  */
 export const getConversationById = async (conversationId, currentUser) => {
-  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+  const rawId = resolveRawId(conversationId);
+  if (!mongoose.Types.ObjectId.isValid(rawId)) {
     const error = new Error("Invalid conversation ID");
     error.statusCode = 400;
     error.errorCode = "INVALID_ID";
     throw error;
   }
 
-  const conversation = await Conversation.findById(conversationId)
+  const conversation = await Conversation.findById(rawId)
     .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
@@ -145,22 +207,30 @@ export const getConversationById = async (conversationId, currentUser) => {
 export const getMessagesByConversationId = async (
   conversationId,
   currentUser,
-  { page = 1, limit = 50 } = {}
+  { page = 1, limit = 50, serviceType } = {}
 ) => {
+  const rawId = resolveRawId(conversationId);
   // Kiểm tra quyền tham gia conversation trước
-  await getConversationById(conversationId, currentUser);
+  await getConversationById(rawId, currentUser);
 
   const numericPage = Math.max(1, parseInt(page, 10) || 1);
   const numericLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
   const skip = (numericPage - 1) * numericLimit;
 
+  const query = { conversationId: rawId };
+  if (serviceType === "RENT") {
+    query.$or = [{ serviceType: "RENT" }, { serviceType: { $exists: false } }, { serviceType: null }];
+  } else if (serviceType === "THRIFT") {
+    query.serviceType = "THRIFT";
+  }
+
   const [messages, total] = await Promise.all([
-    Message.find({ conversationId })
+    Message.find(query)
       .sort({ createdAt: 1 })
       .skip(skip)
       .limit(numericLimit)
       .populate("senderId", "fullName avatarUrl role"),
-    Message.countDocuments({ conversationId }),
+    Message.countDocuments(query),
   ]);
 
   return {
@@ -177,8 +247,9 @@ export const getMessagesByConversationId = async (
 /**
  * Gửi tin nhắn mới vào cuộc trò chuyện
  */
-export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) => {
-  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+export const sendMessage = async ({ conversationId, senderId, text, imageUrl, serviceType = "RENT" }) => {
+  const rawId = resolveRawId(conversationId);
+  if (!mongoose.Types.ObjectId.isValid(rawId)) {
     const error = new Error("Invalid conversation ID");
     error.statusCode = 400;
     error.errorCode = "INVALID_ID";
@@ -195,7 +266,7 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
     throw error;
   }
 
-  const conversation = await Conversation.findById(conversationId);
+  const conversation = await Conversation.findById(rawId);
   if (!conversation) {
     const error = new Error("Conversation not found");
     error.statusCode = 404;
@@ -214,11 +285,14 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
     throw error;
   }
 
+  const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
+
   const message = await Message.create({
-    conversationId,
+    conversationId: rawId,
     senderId,
     text: trimmedText,
     imageUrl: trimmedImageUrl,
+    serviceType: validServiceType,
     createdAt: new Date(),
   });
 
@@ -231,8 +305,10 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
     text: trimmedText || (trimmedImageUrl ? "[Hình ảnh]" : ""),
     senderId,
     imageUrl: trimmedImageUrl,
+    serviceType: validServiceType,
     createdAt: message.createdAt,
   };
+  conversation.serviceType = validServiceType;
   conversation.updatedAt = new Date();
   await conversation.save();
 
@@ -249,7 +325,8 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
  * Xóa một cuộc trò chuyện và toàn bộ tin nhắn liên quan
  */
 export const deleteConversationService = async (conversationId, user) => {
-  const conversation = await Conversation.findById(conversationId);
+  const rawId = resolveRawId(conversationId);
+  const conversation = await Conversation.findById(rawId);
   if (!conversation) {
     const error = new Error("Conversation not found");
     error.statusCode = 404;
@@ -269,8 +346,8 @@ export const deleteConversationService = async (conversationId, user) => {
     throw error;
   }
 
-  await Message.deleteMany({ conversationId });
-  await Conversation.findByIdAndDelete(conversationId);
+  await Message.deleteMany({ conversationId: rawId });
+  await Conversation.findByIdAndDelete(rawId);
 
-  return { conversationId };
+  return { conversationId: rawId };
 };
