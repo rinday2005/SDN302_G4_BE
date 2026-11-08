@@ -9,14 +9,6 @@ import User from "../user/user.model.js";
  */
 export const syncDisputesFromOrders = async () => {
   try {
-    // Xóa các dữ liệu mẫu cũ/ảo (như Leica M6) nếu có
-    await Dispute.deleteMany({
-      $or: [
-        { "product.name": /Leica M6/ },
-        { title: /nghi vấn trầy xước ngàm & bụi cảm biến/ },
-      ],
-    });
-
     // 1. Lấy tất cả RentalOrder có tranh chấp
     const disputedRentalOrders = await RentalOrder.find({
       $or: [

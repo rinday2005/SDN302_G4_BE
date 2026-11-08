@@ -64,6 +64,37 @@ export const createNotification = async ({
  * Helper an toàn để gọi từ các module khác (Order, Payment, Admin...)
  * Không làm crash luồng chính nếu có lỗi xảy ra
  */
+
+/**
+ * Gửi thông báo an toàn tới toàn bộ Quản trị viên (ADMIN)
+ */
+export const notifyAdminsSafe = async ({
+  title,
+  message,
+  type = NOTIFICATION_TYPE.SYSTEM,
+  link = "/admin",
+  metadata = {},
+}) => {
+  try {
+    const User = mongoose.model("User");
+    const admins = await User.find({ role: "ADMIN" });
+    const promises = admins.map((admin) =>
+      createNotification({
+        userId: admin._id,
+        title,
+        message,
+        type,
+        link,
+        metadata,
+      })
+    );
+    return await Promise.all(promises);
+  } catch (err) {
+    console.error("[Notification] Non-blocking admin notification error:", err.message);
+    return [];
+  }
+};
+
 export const sendSystemNotificationSafe = async (payload) => {
   try {
     return await createNotification(payload);
