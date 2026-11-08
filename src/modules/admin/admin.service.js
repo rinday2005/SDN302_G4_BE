@@ -9,7 +9,7 @@ import KycRecord from "../kyc/kyc.model.js";
 import Dispute from "../dispute/dispute.model.js";
 import DisputeVerdict from "../dispute/disputeVerdict.model.js";
 import { ensureSampleDisputes } from "../dispute/dispute.seed.js";
-import { sendSystemNotificationSafe } from "../notification/notification.service.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../notification/notification.service.js";
 import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 
 const createError = (message, statusCode = 400, errorCode = "BAD_REQUEST") => {
@@ -175,7 +175,7 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
 
     await product.save();
 
-    // [BE-S6-02] Bắn thông báo kết quả duyệt listing RENT
+    // [BE-S6-02] Bắn thông báo kết quả duyệt listing RENT (tới Shop Owner & Admin)
     if (product.ownerId) {
       sendSystemNotificationSafe({
         userId: product.ownerId,
@@ -185,10 +185,17 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
             ? `Sản phẩm "${product.name}" đã được Admin phê duyệt và hiển thị trên hệ thống.`
             : `Sản phẩm "${product.name}" bị từ chối.${product.rejectionReason ? ` Lý do: ${product.rejectionReason}` : ""}`,
         type: NOTIFICATION_TYPE.LISTING,
-        link: `/rent/products/${product._id}`,
+        link: `/shop/inventory`,
         metadata: { productId: product._id, status },
       });
     }
+    notifyAdminsSafe({
+      title: status === "APPROVED" ? "Đã phê duyệt sản phẩm cho thuê" : "Đã từ chối sản phẩm cho thuê",
+      message: `Bạn đã ${status === "APPROVED" ? "phê duyệt" : "từ chối"} sản phẩm cho thuê "${product.name}".`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/admin/rent`,
+      metadata: { productId: product._id, status },
+    });
 
     return { type: "RENT", item: product };
   } else if (normalizedType === "thrift") {
@@ -208,7 +215,7 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
 
     await listing.save();
 
-    // [BE-S6-02] Bắn thông báo kết quả duyệt listing THRIFT
+    // [BE-S6-02] Bắn thông báo kết quả duyệt listing THRIFT (tới Shop Owner & Admin)
     if (listing.ownerId) {
       sendSystemNotificationSafe({
         userId: listing.ownerId,
@@ -218,10 +225,17 @@ export const reviewListingStatusService = async (type, id, { status, rejectionRe
             ? `Mục đăng "${listing.name}" đã được Admin phê duyệt và hiển thị trên sàn.`
             : `Mục đăng "${listing.name}" bị từ chối.${listing.rejectionReason ? ` Lý do: ${listing.rejectionReason}` : ""}`,
         type: NOTIFICATION_TYPE.LISTING,
-        link: `/thrift/${listing._id}`,
+        link: `/shop/thrift`,
         metadata: { listingId: listing._id, status },
       });
     }
+    notifyAdminsSafe({
+      title: status === "APPROVED" ? "Đã phê duyệt mục đăng Secondhand" : "Đã từ chối mục đăng Secondhand",
+      message: `Bạn đã ${status === "APPROVED" ? "phê duyệt" : "từ chối"} mục đăng thanh lý "${listing.name}".`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/admin/thrift`,
+      metadata: { listingId: listing._id, status },
+    });
 
     return { type: "THRIFT", item: listing };
   } else {
@@ -870,6 +884,35 @@ export const resolveDisputeService = async (
       });
     }
 
+    // Bắn thông báo phán quyết tranh chấp tới cả 3 role
+    if (disputeDoc.renter?.id) {
+      sendSystemNotificationSafe({
+        userId: disputeDoc.renter.id,
+        title: "Phán quyết tranh chấp đã ban hành",
+        message: `Hồ sơ tranh chấp #${disputeDoc.disputeCode} (Đơn ${disputeDoc.orderCode}) đã được giải quyết. Hoàn về ví của bạn: ${refundAmt.toLocaleString("vi-VN")} VND.`,
+        type: NOTIFICATION_TYPE.REFUND,
+        link: `/user/wallet`,
+        metadata: { disputeCode: disputeDoc.disputeCode, orderCode: disputeDoc.orderCode, refundAmt },
+      });
+    }
+    if (disputeDoc.shopOwner?.id) {
+      sendSystemNotificationSafe({
+        userId: disputeDoc.shopOwner.id,
+        title: "Phán quyết tranh chấp đã ban hành",
+        message: `Hồ sơ tranh chấp #${disputeDoc.disputeCode} (Đơn ${disputeDoc.orderCode}) đã được giải quyết. Giải ngân về xưởng: ${payoutAmt.toLocaleString("vi-VN")} VND.`,
+        type: NOTIFICATION_TYPE.REFUND,
+        link: `/shop/rent/orders/${disputeDoc.orderCode}`,
+        metadata: { disputeCode: disputeDoc.disputeCode, orderCode: disputeDoc.orderCode, payoutAmt },
+      });
+    }
+    notifyAdminsSafe({
+      title: `Đã ban hành phán quyết #${disputeDoc.disputeCode}`,
+      message: `Hồ sơ tranh chấp #${disputeDoc.disputeCode} đã được ký lệnh thực thi (Hoàn khách: ${refundAmt.toLocaleString("vi-VN")} VND | Bồi thường xưởng: ${payoutAmt.toLocaleString("vi-VN")} VND).`,
+      type: NOTIFICATION_TYPE.SYSTEM,
+      link: `/admin/disputes/${disputeDoc.disputeCode}`,
+      metadata: { disputeCode: disputeDoc.disputeCode, orderCode: disputeDoc.orderCode },
+    });
+
     return {
       dispute: disputeDoc,
       verdict: verdictDoc,
@@ -1144,7 +1187,7 @@ export const createRentalOrderDisputeService = async (orderId, user, { reason = 
     throw createError("Bạn không có quyền khiếu nại đơn hàng này", 403, "FORBIDDEN");
   }
 
-  order.status = RENTAL_ORDER_STATUS.DISPUTED;
+    order.status = RENTAL_ORDER_STATUS.DISPUTED;
   order.dispute = {
     status: "OPEN",
     reason: String(reason || "Yêu cầu Giám định viên ReUse Hub can thiệp đối soát tranh chấp").trim(),
@@ -1154,6 +1197,36 @@ export const createRentalOrderDisputeService = async (orderId, user, { reason = 
   };
 
   await order.save();
+
+  // Bắn thông báo mở tranh chấp tới cả 3 role
+  if (order.renterId) {
+    sendSystemNotificationSafe({
+      userId: order.renterId,
+      title: "Hồ sơ tranh chấp đơn thuê đã mở",
+      message: `Đơn thuê ${order.orderCode} đã chuyển sang trạng thái đối soát tranh chấp (${order.dispute.reason}).`,
+      type: NOTIFICATION_TYPE.RENTAL_ORDER,
+      link: `/rent/orders/${order._id}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode },
+    });
+  }
+  if (order.shopOwnerId) {
+    sendSystemNotificationSafe({
+      userId: order.shopOwnerId,
+      title: "Tranh chấp đơn thuê mới",
+      message: `Đơn thuê ${order.orderCode} vừa được mở hồ sơ tranh chấp (${order.dispute.reason}).`,
+      type: NOTIFICATION_TYPE.RENTAL_ORDER,
+      link: `/shop/rent/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Hồ sơ tranh chấp đơn thuê mới",
+    message: `Đơn thuê ${order.orderCode} vừa yêu cầu Ban Trọng Tài phân xử (${order.dispute.reason}).`,
+    type: NOTIFICATION_TYPE.SYSTEM,
+    link: `/admin/disputes`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   return order;
 };
 
@@ -1635,6 +1708,14 @@ export const updatePlatformFeeService = async ({ rentFeePercent, thriftFeePercen
 
   await config.save();
 
+  notifyAdminsSafe({
+    title: "Đã cập nhật cấu hình phí sàn",
+    message: `Phí sàn đã được cập nhật: RENT ${config.rentFeePercent}% | THRIFT ${config.thriftFeePercent}%.`,
+    type: NOTIFICATION_TYPE.SYSTEM,
+    link: `/admin/finance`,
+    metadata: { rentFeePercent: config.rentFeePercent, thriftFeePercent: config.thriftFeePercent },
+  });
+
   return {
     rentFeePercent: config.rentFeePercent,
     thriftFeePercent: config.thriftFeePercent,
@@ -1768,7 +1849,7 @@ export const reviewShopKycAdminService = async (shopId, { status, rejectionReaso
 
   await shop.save();
 
-  // Send notification to shop owner
+  // Send notification to shop owner & admin
   sendSystemNotificationSafe({
     userId: shop._id,
     title: status === "APPROVED" ? "Hồ sơ KYC Cửa hàng được duyệt" : "Hồ sơ KYC Cửa hàng bị từ chối",
@@ -1779,6 +1860,13 @@ export const reviewShopKycAdminService = async (shopId, { status, rejectionReaso
     type: NOTIFICATION_TYPE.KYC,
     link: "/shop/profile",
     metadata: { status },
+  });
+  notifyAdminsSafe({
+    title: status === "APPROVED" ? "Đã phê duyệt KYC Cửa hàng" : "Đã từ chối KYC Cửa hàng",
+    message: `Bạn đã ${status === "APPROVED" ? "phê duyệt" : "từ chối"} hồ sơ KYC cho cửa hàng "${shop.shopProfile?.shopName || shop.fullName}".`,
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/admin/shops",
+    metadata: { shopId: shop._id, status },
   });
 
   return shop;

@@ -9,7 +9,7 @@ import { removeRentItems, removeThriftItems } from "../cart/cart.service.js";
 import { checkRentalAvailability } from "../rent/availability/availability.service.js";
 import User from "../user/user.model.js";
 import { calculateShippingFee, normalizeShopBranch } from "../../utils/shipping.js";
-import { sendSystemNotificationSafe } from "../notification/notification.service.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../notification/notification.service.js";
 import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 import { buildVnPayUrl } from "../payment/vnpay.utils.js";
 import Payment from "../payment/payment.model.js";
@@ -223,6 +223,28 @@ export const createGroupCheckout = async ({
     totalDeposit += shopDepositAmount;
     totalShipping += shopShippingFee;
 
+    // Bắn thông báo ngay cho Shop Owner khi có đơn thuê mới cần duyệt
+    if (shopId) {
+      const primaryItemName = orderItemSnapshots?.[0]?.productName || orderItemSnapshots?.[0]?.name || "Sản phẩm cho thuê";
+      sendSystemNotificationSafe({
+        userId: shopId,
+        title: "Đơn thuê mới chờ duyệt",
+        message: `Khách hàng ${user?.fullName || "Khách hàng"} vừa gửi yêu cầu duyệt đơn thuê ${childOrderCode} ("${primaryItemName}").`,
+        type: NOTIFICATION_TYPE.RENTAL_ORDER,
+        link: `/shop/rent/orders/${childOrderCode}`,
+        metadata: {
+          orderId: childRentalOrder._id,
+          orderCode: childOrderCode,
+          productName: primaryItemName,
+          renterId: user?._id,
+          totalAmount: shopTotalAmount,
+          depositAmount: shopDepositAmount,
+          rentalFee: shopRentalFee,
+          status: childRentalOrder.status,
+        },
+      });
+    }
+
     childOrderResults.push({
       orderId: childRentalOrder._id,
       orderModel: "RentalOrder",
@@ -295,6 +317,23 @@ export const createGroupCheckout = async ({
     totalSubtotal += shopItemsTotal;
     totalShipping += shopShippingFee;
 
+    if (shopId) {
+      const primaryThriftName = orderItemSnapshots?.[0]?.name || "Sản phẩm Secondhand";
+      sendSystemNotificationSafe({
+        userId: shopId,
+        title: "Đơn mua Secondhand mới",
+        message: `Khách hàng ${user?.fullName || "Khách hàng"} vừa đặt mua đơn ${childOrderCode} ("${primaryThriftName}").`,
+        type: NOTIFICATION_TYPE.THRIFT_ORDER,
+        link: `/shop/thrift/orders/${childOrderCode}`,
+        metadata: {
+          orderId: childThriftOrder._id,
+          orderCode: childOrderCode,
+          productName: primaryThriftName,
+          totalAmount: shopTotalAmount,
+        },
+      });
+    }
+
     childOrderResults.push({
       orderId: childThriftOrder._id,
       orderModel: "ThriftOrder",
@@ -329,6 +368,23 @@ export const createGroupCheckout = async ({
     paymentStatus: "PENDING",
     status: "PENDING",
     note,
+  });
+
+  // Bắn thông báo cho Khách hàng và Admin khi đặt đơn gộp
+  sendSystemNotificationSafe({
+    userId: user._id,
+    title: "Đặt đơn hàng thành công",
+    message: `Đơn hàng ${groupOrderCode} gồm ${childOrderResults.length} kiện hàng (${totalAmount.toLocaleString("vi-VN")} VND) đã được khởi tạo.`,
+    type: NOTIFICATION_TYPE.RENTAL_ORDER,
+    link: `/orders`,
+    metadata: { orderGroupId: orderGroup._id, orderCode: groupOrderCode, totalAmount },
+  });
+  notifyAdminsSafe({
+    title: "Đơn hàng mới trên hệ thống",
+    message: `Khách hàng ${user?.fullName || "Khách hàng"} vừa tạo đơn hàng ${groupOrderCode} (${childOrderResults.length} kiện - ${totalAmount.toLocaleString("vi-VN")} VND).`,
+    type: NOTIFICATION_TYPE.RENTAL_ORDER,
+    link: `/admin/rent`,
+    metadata: { orderGroupId: orderGroup._id, orderCode: groupOrderCode, totalAmount },
   });
 
   // 8. Dọn các items đã checkout khỏi giỏ hàng

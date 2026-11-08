@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import RentalReturn from "./return.model.js";
 import RentalOrder, { RENTAL_ORDER_STATUS } from "../order/order.model.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
 /**
  * Renter gửi yêu cầu trả đồ & biên bản hình ảnh đối kiểm
@@ -91,6 +93,31 @@ export const createReturnRequest = async (user, data) => {
   order.shippingDetails.returnTrackingCode = trackingCode;
   order.shippingDetails.returnedAt = new Date();
   await order.save();
+
+  // 3. Bắn thông báo tới cả 3 role
+  sendSystemNotificationSafe({
+    userId: order.renterId || user._id,
+    title: "Đã gửi yêu cầu hoàn trả đồ thuê",
+    message: `Phiếu hoàn trả cho đơn thuê ${order.orderCode} đã được khởi tạo (Mã vận đơn trả: ${trackingCode}).`,
+    type: NOTIFICATION_TYPE.RETURN,
+    link: `/rent/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, trackingCode },
+  });
+  sendSystemNotificationSafe({
+    userId: order.shopOwnerId,
+    title: "Yêu cầu trả đồ thuê mới",
+    message: `Khách hàng vừa gửi phiếu hoàn trả cho đơn thuê ${order.orderCode} (Mã vận đơn trả: ${trackingCode}).`,
+    type: NOTIFICATION_TYPE.RETURN,
+    link: `/shop/rent/orders/${order.orderCode}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, trackingCode },
+  });
+  notifyAdminsSafe({
+    title: "Phiếu hoàn trả đồ thuê mới",
+    message: `Đơn thuê ${order.orderCode} vừa có phiếu hoàn trả mới (${trackingCode}).`,
+    type: NOTIFICATION_TYPE.RETURN,
+    link: `/admin/rent`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, trackingCode },
+  });
 
   return rentalReturn;
 };
@@ -237,6 +264,33 @@ export const inspectAndCompleteReturn = async (returnId, user, inspectionData) =
     order.status = RENTAL_ORDER_STATUS.COMPLETED;
     await order.save();
   }
+
+  // 3. Bắn thông báo hoàn tất thẩm định & hoàn cọc tới cả 3 role
+  const orderCodeStr = rentalReturn.orderCode || order?.orderCode || "";
+  const orderIdRef = order?._id || rentalReturn.orderId;
+  sendSystemNotificationSafe({
+    userId: rentalReturn.renterId,
+    title: "Đã thẩm định trả đồ & hoàn cọc",
+    message: `Đơn thuê ${orderCodeStr} đã hoàn tất thẩm định (${conditionGrade}). Số tiền cọc hoàn lại: ${finalRefund.toLocaleString("vi-VN")} VND.`,
+    type: NOTIFICATION_TYPE.REFUND,
+    link: `/rent/orders/${orderIdRef}`,
+    metadata: { orderId: orderIdRef, orderCode: orderCodeStr, refundAmount: finalRefund },
+  });
+  sendSystemNotificationSafe({
+    userId: rentalReturn.shopOwnerId || user._id,
+    title: "Đã hoàn tất thẩm định trả đồ",
+    message: `Bạn đã hoàn tất thẩm định phiếu trả đồ cho đơn ${orderCodeStr} (${conditionGrade}). Hoàn cọc: ${finalRefund.toLocaleString("vi-VN")} VND.`,
+    type: NOTIFICATION_TYPE.REFUND,
+    link: `/shop/rent/orders/${orderCodeStr}`,
+    metadata: { orderId: orderIdRef, orderCode: orderCodeStr, refundAmount: finalRefund },
+  });
+  notifyAdminsSafe({
+    title: "Hoàn tất thẩm định trả đồ thuê",
+    message: `Phiếu trả đồ của đơn ${orderCodeStr} đã được thẩm định (${conditionGrade}) và giải phóng cọc ${finalRefund.toLocaleString("vi-VN")} VND.`,
+    type: NOTIFICATION_TYPE.REFUND,
+    link: `/admin/rent`,
+    metadata: { orderId: orderIdRef, orderCode: orderCodeStr, refundAmount: finalRefund },
+  });
 
   return rentalReturn;
 };
