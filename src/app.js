@@ -32,6 +32,11 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+// Chuyển hướng các đường dẫn thanh toán nếu browser vô tình gọi vào cổng 5000 sang cổng 5173 của Front-end
+app.get(["/payment-success", "/payment-failed", "/payment-return"], (req, res) => {
+  return res.redirect(`http://localhost:5173${req.originalUrl}`);
+});
+
 app.use("/", routes);
 
 app.use((req, res, next) => {

@@ -72,35 +72,51 @@ const vnPayIpnController = async (req, res) => {
 };
 
 /**
- * [BE-S3-05] GET /api/payments/vnpay-return
+ * [BE-S3-05] GET /api/payments/vnpay-return (hoặc /api/payment/vnpay-return)
  * Client Browser redirect từ VNPay sau khi thực hiện giao dịch
+ * Được bọc try/catch an toàn tuyệt đối: Luôn redirect về Frontend (cổng 5173), không bao giờ làm sập kết nối
  */
-const vnPayReturnController = async (req, res, next) => {
+const vnPayReturnController = async (req, res) => {
+  const frontendBase = (process.env.FRONTEND_URL || FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+  const isAjax =
+    req.xhr ||
+    req.headers.accept?.includes("application/json") ||
+    req.query.format === "json" ||
+    req.headers["x-requested-with"] === "XMLHttpRequest";
+
   try {
     const result = await processVnPayReturn(req.query);
-
-    const isAjax =
-      req.xhr ||
-      req.headers.accept?.includes("application/json") ||
-      req.query.format === "json" ||
-      req.headers["x-requested-with"] === "XMLHttpRequest";
 
     // 1. Nếu là AJAX/Fetch request từ Frontend: Trả JSON
     if (isAjax) {
       return successResponse(res, "VNPay return processed successfully", result);
     }
 
-    // 2. Nếu là Browser redirect trực tiếp từ VNPay: Chuyển hướng về Frontend
-    const frontendBase = (process.env.FRONTEND_URL || FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+    // 2. Nếu là Browser redirect trực tiếp từ VNPay: Luôn ép về Frontend Vite (port 5173)
+    if (frontendBase.includes("localhost:3000") || frontendBase.includes("127.0.0.1:3000")) {
+      frontendBase = "http://localhost:5173";
+    }
+
     if (result.success) {
-      const redirectUrl = `${frontendBase}/payment-success?orderId=${result.orderId}&orderCode=${result.orderCode}&amount=${result.totalAmount}&txnRef=${result.txnRef || ""}&transactionNo=${result.transactionNo || ""}`;
+      const redirectUrl = `${frontendBase}/payment-success?orderId=${result.orderId}&orderCode=${encodeURIComponent(result.orderCode || "")}&amount=${result.totalAmount}&type=${result.orderType || "RENT"}&txnRef=${encodeURIComponent(result.txnRef || req.query.vnp_TxnRef || "")}&transactionNo=${encodeURIComponent(result.transactionNo || req.query.vnp_TransactionNo || "")}`;
       return res.redirect(redirectUrl);
     } else {
-      const redirectUrl = `${frontendBase}/payment-failed?orderId=${result.orderId || ""}&orderCode=${result.orderCode || ""}&code=${result.responseCode || "99"}&message=${encodeURIComponent(result.message || "Thanh toán không thành công")}`;
+      const redirectUrl = `${frontendBase}/payment-failed?orderId=${result.orderId || ""}&orderCode=${encodeURIComponent(result.orderCode || "")}&type=${result.orderType || "RENT"}&code=${result.responseCode || "99"}&message=${encodeURIComponent(result.message || "Thanh toán không thành công")}`;
       return res.redirect(redirectUrl);
     }
   } catch (error) {
-    next(error);
+    console.error("Lỗi xử lý VNPay Return:", error);
+
+    if (isAjax) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || "Lỗi xử lý phản hồi từ VNPay",
+      });
+    }
+
+    // Bắt buộc redirect về Front-end kèm lỗi thay vì throw để tránh sập connection
+    const fallbackRedirect = `${frontendBase}/payment-failed?code=500&message=${encodeURIComponent("Lỗi hệ thống khi xử lý kết quả: " + (error.message || "Unknown error"))}`;
+    return res.redirect(fallbackRedirect);
   }
 };
 
