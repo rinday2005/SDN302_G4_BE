@@ -234,6 +234,9 @@ export const sendMessage = async ({ conversationId, senderId, text, imageUrl }) 
   conversation.updatedAt = new Date();
   await conversation.save();
 
+  await conversation.populate("participants", "fullName email avatarUrl role shopProfile");
+  await conversation.populate("lastMessage.senderId", "fullName avatarUrl role");
+
   return {
     message: populatedMessage,
     conversation,
