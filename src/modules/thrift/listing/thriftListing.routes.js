@@ -75,4 +75,4 @@ router.delete(
   thriftController.deleteThriftListing
 );
 
-export default router;
+export default router;
