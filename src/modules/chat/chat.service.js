@@ -36,21 +36,21 @@ export const getOrCreateConversationForUser = async (
     throw error;
   }
 
-  const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
-
+  // Tìm cuộc trò chuyện sẵn có giữa User và Shop Owner (hợp nhất 1 kênh liên lạc duy nhất)
   let conversation = await Conversation.findOne({
     participants: { $all: [userId, shopOwner._id], $size: 2 },
-    serviceType: validServiceType,
   })
+    .sort({ updatedAt: -1 })
     .populate("participants", "fullName email avatarUrl role")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   if (!conversation) {
+    const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
     const newConv = await Conversation.create({
       participants: [userId, shopOwner._id],
       serviceType: validServiceType,
       orderCode: orderCode || "",
-      orderTitle: orderTitle || (validServiceType === "THRIFT" ? "Hỏi mua hiện vật THRIFT" : "Tư vấn thiết bị RENT"),
+      orderTitle: orderTitle || "Tư vấn & Trò chuyện cùng Atelier",
       lastMessage: null,
     });
 
