@@ -21,7 +21,15 @@ export const validateReviewListing = (req, res, next) => {
 export const validateResolveDispute = (req, res, next) => {
   const { resolution, refundToRenter, payoutToShop } = req.body || {};
 
-  const allowedResolutions = ["REFUND_RENTER", "PAY_SHOP_OWNER", "SPLIT", "DISMISSED"];
+  const allowedResolutions = [
+    "REFUND_RENTER",
+    "REFUND_BUYER",
+    "PAY_SHOP_OWNER",
+    "RELEASE_SELLER",
+    "SPLIT",
+    "PARTIAL_REFUND",
+    "DISMISSED",
+  ];
   if (!resolution || !allowedResolutions.includes(resolution)) {
     const error = new Error(
       `Phương án xử lý tranh chấp (resolution) không hợp lệ. Phải là một trong: ${allowedResolutions.join(", ")}`
