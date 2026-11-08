@@ -53,16 +53,18 @@ export const getOrCreateConversationForUser = async ({
     throw error;
   }
 
-  // Tìm cuộc trò chuyện giữa userId và targetShopOwner cụ thể này
+  const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
+
+  // Tìm cuộc trò chuyện giữa userId và targetShopOwner cụ thể này theo đúng serviceType (RENT hoặc THRIFT)
   let conversation = await Conversation.findOne({
     participants: { $all: [userId, targetShopOwner._id], $size: 2 },
+    serviceType: validServiceType,
   })
     .sort({ updatedAt: -1 })
     .populate("participants", "fullName email avatarUrl role shopProfile")
     .populate("lastMessage.senderId", "fullName avatarUrl role");
 
   if (!conversation) {
-    const validServiceType = serviceType === "THRIFT" ? "THRIFT" : "RENT";
     const shopDisplayName = targetShopOwner.shopProfile?.shopName || targetShopOwner.fullName || "Shop";
     const newConv = await Conversation.create({
       participants: [userId, targetShopOwner._id],
