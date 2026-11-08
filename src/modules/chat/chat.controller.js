@@ -133,13 +133,14 @@ export const sendMessageHttp = async (req, res, next) => {
 
       result.conversation.participants.forEach((pId) => {
         const pIdStr = pId._id ? pId._id.toString() : pId.toString();
-        io.to(`user:${pIdStr}`).emit("new_message", messageObj);
+        if (pIdStr !== req.user._id.toString()) {
+          io.to(`user:${pIdStr}`).emit("new_message", messageObj);
+        }
         io.to(`user:${pIdStr}`).emit(
           "conversation_updated",
           result.conversation
         );
       });
-      io.to("role:SHOP_OWNER").emit("new_message", messageObj);
     }
 
     return successResponse(
