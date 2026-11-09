@@ -57,30 +57,31 @@ const syncLocalUsersAndEnsureDefaults = async () => {
   try {
     const defaultPasswordHash = await bcrypt.hash("Password123!", 10);
 
-    // 1. Ensure single SHOP_OWNER exists and is KYC verified
-    let shopOwner = (await User.findOne({ email: "shopowner@reuse.vn" })) || (await User.findOne({ role: "SHOP_OWNER" }));
-    if (!shopOwner) {
-      shopOwner = await User.findOneAndUpdate(
-        { email: "shopowner@reuse.vn" },
-        {
-          $setOnInsert: {
-            email: "shopowner@reuse.vn",
-            passwordHash: defaultPasswordHash,
-            fullName: "ReUse Official Shop",
-            phoneNumber: "0901234567",
-            role: "SHOP_OWNER",
-            kycStatus: "APPROVED",
-            address: {
-              province: "Thành phố Đà Nẵng",
-              district: "Quận Hải Châu",
-              ward: "Phường Hải Châu 1",
-              detail: "48 Bạch Đằng",
-            },
+    // 1. Ensure shopowner@reuse.vn exists and is KYC verified with role SHOP_OWNER
+    const shopOwner = await User.findOneAndUpdate(
+      { email: "shopowner@reuse.vn" },
+      {
+        $set: {
+          passwordHash: defaultPasswordHash,
+          role: "SHOP_OWNER",
+          status: "active",
+          isLocked: false,
+        },
+        $setOnInsert: {
+          email: "shopowner@reuse.vn",
+          fullName: "ReUse Official Shop",
+          phoneNumber: "0901234567",
+          kycStatus: "APPROVED",
+          address: {
+            province: "Thành phố Đà Nẵng",
+            district: "Quận Hải Châu",
+            ward: "Phường Hải Châu 1",
+            detail: "48 Bạch Đằng",
           },
         },
-        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
-      );
-    }
+      },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+    );
     if (shopOwner) {
       const existingKyc = await KycRecord.findOne({ userId: shopOwner._id });
       if (!existingKyc) {

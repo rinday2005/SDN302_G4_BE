@@ -25,8 +25,11 @@ export const socketAuthMiddleware = async (socket, next) => {
       return next(error);
     }
 
-    if (typeof token === "string" && token.startsWith("Bearer ")) {
-      token = token.slice(7).trim();
+    if (typeof token === "string") {
+      token = token.replace(/^"(.*)"$/, "$1").trim();
+      if (token.startsWith("Bearer ")) {
+        token = token.slice(7).trim();
+      }
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -41,6 +44,8 @@ export const socketAuthMiddleware = async (socket, next) => {
     socket.user = user;
     socket.userId = user._id.toString();
     socket.userRole = user.role;
+
+    console.log(`🟢 [Socket.IO] Authenticated socket ${socket.id} for user ${user.email} (${user.role})`);
 
     return next();
   } catch (err) {
@@ -76,16 +81,19 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
   io.on("connection", (socket) => {
     // Tự động join room cá nhân để nhận thông báo real-time theo user ID
     socket.join(`user:${socket.userId}`);
+    if (socket.userRole === "SHOP_OWNER") {
+      socket.join("role:SHOP_OWNER");
+    }
 
     /**
      * AC: Chỉ participant mới join được room; User không thể đọc conversation của User khác
      */
     const handleJoinRoom = async (data, callback) => {
       try {
-        const conversationId =
-          typeof data === "string" ? data : data?.conversationId;
+        const originalId = typeof data === "string" ? data : data?.conversationId;
+        const rawConvId = (originalId || "").toString().replace(/_(RENT|THRIFT)$/, "");
 
-        if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) {
+        if (!rawConvId || !mongoose.Types.ObjectId.isValid(rawConvId)) {
           const res = {
             success: false,
             errorCode: "INVALID_ID",
@@ -96,7 +104,7 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
           return;
         }
 
-        const conversation = await Conversation.findById(conversationId);
+        const conversation = await Conversation.findById(rawConvId);
         if (!conversation) {
           const res = {
             success: false,
@@ -124,11 +132,14 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
         }
 
         // Chỉ participant mới được join room
-        socket.join(conversationId.toString());
+        socket.join(rawConvId);
+        if (originalId && originalId.toString() !== rawConvId) {
+          socket.join(originalId.toString());
+        }
 
         const res = {
           success: true,
-          conversationId: conversationId.toString(),
+          conversationId: rawConvId,
           message: "Joined conversation room successfully",
         };
         socket.emit("joined_room", res);
@@ -151,13 +162,15 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
      * Rời khỏi room
      */
     const handleLeaveRoom = (data, callback) => {
-      const conversationId =
+      const originalId =
         typeof data === "string" ? data : data?.conversationId;
-      if (conversationId) {
-        socket.leave(conversationId.toString());
+      if (originalId) {
+        const rawConvId = originalId.toString().replace(/_(RENT|THRIFT)$/, "");
+        socket.leave(rawConvId);
+        socket.leave(originalId.toString());
         const res = {
           success: true,
-          conversationId: conversationId.toString(),
+          conversationId: rawConvId,
         };
         socket.emit("left_room", res);
         if (typeof callback === "function") callback(res);
@@ -172,29 +185,75 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
      */
     socket.on("send_message", async (data, callback) => {
       try {
-        const { conversationId, text, imageUrl } = data || {};
+        const { conversationId, text, imageUrl, token: clientToken } = data || {};
+
+        let senderId = socket.userId;
+        if (clientToken) {
+          try {
+            let t = clientToken;
+            if (typeof t === "string") {
+              t = t.replace(/^"(.*)"$/, "$1").trim();
+              if (t.startsWith("Bearer ")) t = t.slice(7).trim();
+            }
+            const decoded = jwt.verify(t, JWT_SECRET);
+            if (decoded?.id) {
+              senderId = decoded.id.toString();
+              socket.userId = senderId;
+              const freshUser = await User.findById(decoded.id).select("-passwordHash");
+              if (freshUser) {
+                socket.user = freshUser;
+                socket.userRole = freshUser.role;
+              }
+            }
+          } catch (tErr) {
+            console.warn("⚠️ [Socket.IO] Client token verification notice:", tErr.message);
+          }
+        }
 
         const result = await sendMessage({
           conversationId,
-          senderId: socket.userId,
+          senderId,
           text,
           imageUrl,
+          serviceType: data?.serviceType,
         });
 
-        // Broadcast tin nhắn tới tất cả thành viên đang ở trong room conversationId
-        io.to(conversationId.toString()).emit("new_message", result.message);
-        io.to(conversationId.toString()).emit("receive_message", result.message);
+        const messageObj = result.message.toObject
+          ? result.message.toObject()
+          : { ...result.message };
+        messageObj.serviceType = result.message.serviceType || result.conversation.serviceType || "RENT";
+        if (data?.clientMsgId) {
+          messageObj.clientMsgId = data.clientMsgId;
+        }
 
-        // Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
+        // 1. Broadcast tin nhắn tới các thành viên khác trong room conversationId
+        const rawConvId = conversationId.toString().replace(/_(RENT|THRIFT)$/, "");
+        socket.to(rawConvId).emit("new_message", messageObj);
+        socket.to(conversationId.toString()).emit("new_message", messageObj);
+
+        // 2. Broadcast tin nhắn tới room cá nhân của từng participant (để nhận tin khi đứng ở trang bất kỳ)
         result.conversation.participants.forEach((participantId) => {
-          io.to(`user:${participantId.toString()}`).emit(
+          const pIdStr = participantId._id
+            ? participantId._id.toString()
+            : participantId.toString();
+          if (pIdStr !== senderId) {
+            io.to(`user:${pIdStr}`).emit("new_message", messageObj);
+          }
+        });
+
+        // 3. Phát tín hiệu cập nhật conversation tới room cá nhân của các participants
+        result.conversation.participants.forEach((participantId) => {
+          const pIdStr = participantId._id
+            ? participantId._id.toString()
+            : participantId.toString();
+          io.to(`user:${pIdStr}`).emit(
             "conversation_updated",
             result.conversation
           );
         });
 
         if (typeof callback === "function") {
-          callback({ success: true, data: result.message });
+          callback({ success: true, data: messageObj, message: messageObj });
         }
       } catch (err) {
         const res = {
@@ -213,21 +272,36 @@ export const initSocketServer = (httpServer, customOptions = {}) => {
     socket.on("typing", (data) => {
       const conversationId = data?.conversationId;
       if (conversationId) {
-        socket.to(conversationId.toString()).emit("user_typing", {
-          conversationId,
+        const rawConvId = conversationId.toString().replace(/_(RENT|THRIFT)$/, "");
+        socket.to(rawConvId).emit("user_typing", {
+          conversationId: rawConvId,
           userId: socket.userId,
           fullName: socket.user.fullName,
         });
+        if (conversationId.toString() !== rawConvId) {
+          socket.to(conversationId.toString()).emit("user_typing", {
+            conversationId: conversationId.toString(),
+            userId: socket.userId,
+            fullName: socket.user.fullName,
+          });
+        }
       }
     });
 
     socket.on("stop_typing", (data) => {
       const conversationId = data?.conversationId;
       if (conversationId) {
-        socket.to(conversationId.toString()).emit("user_stop_typing", {
-          conversationId,
+        const rawConvId = conversationId.toString().replace(/_(RENT|THRIFT)$/, "");
+        socket.to(rawConvId).emit("user_stop_typing", {
+          conversationId: rawConvId,
           userId: socket.userId,
         });
+        if (conversationId.toString() !== rawConvId) {
+          socket.to(conversationId.toString()).emit("user_stop_typing", {
+            conversationId: conversationId.toString(),
+            userId: socket.userId,
+          });
+        }
       }
     });
 

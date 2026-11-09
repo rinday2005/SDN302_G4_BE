@@ -24,6 +24,12 @@ const messageSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    serviceType: {
+      type: String,
+      enum: ["RENT", "THRIFT"],
+      default: "RENT",
+      index: true,
+    },
     createdAt: {
       type: Date,
       default: Date.now,
