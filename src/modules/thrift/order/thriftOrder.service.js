@@ -5,6 +5,8 @@ import Cart from "../../cart/cart.model.js";
 import { removeThriftItems } from "../../cart/cart.service.js";
 import User from "../../user/user.model.js";
 import { calculateShippingFee } from "../../../utils/shipping.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
 const DEFAULT_SHOP_PROVINCE = "Đà Nẵng";
 
@@ -130,12 +132,16 @@ export const checkoutThriftOrder = async ({
 
   // AC: Phí shipping chỉ tính MỘT LẦN cho toàn bộ order
   let shippingFee = 0;
+  let firstOwnerId = listings[0]?.ownerId;
+  if (!firstOwnerId) {
+    const defaultShop = await User.findOne({ role: "SHOP_OWNER" }).select("_id");
+    firstOwnerId = defaultShop?._id;
+  }
   if (customShippingFee !== undefined && customShippingFee !== null && !isNaN(Number(customShippingFee))) {
     shippingFee = Math.max(0, Number(customShippingFee));
   } else {
     // Tự động tính phí shipping dựa trên vùng giữa Shop/Seller và User
     let sellerProvince = listings[0]?.location || DEFAULT_SHOP_PROVINCE;
-    const firstOwnerId = listings[0]?.ownerId;
     if (firstOwnerId) {
       const owner = await User.findById(firstOwnerId).select("address");
       if (!listings[0]?.location && owner?.address?.province) {
@@ -187,6 +193,34 @@ export const checkoutThriftOrder = async ({
     user._id,
     listings.map((l) => l._id)
   );
+
+  // 8. Gửi thông báo tới cả 3 role (Customer, Shop Owner, Admin)
+  const productTitle = listings[0]?.name || "Sản phẩm Secondhand";
+  sendSystemNotificationSafe({
+    userId: user._id,
+    title: "Đặt mua đơn hàng Secondhand thành công",
+    message: `Đơn hàng ${order.orderCode} (${productTitle}) đã được khởi tạo với tổng giá trị ${totalAmount.toLocaleString("vi-VN")} VND.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, totalAmount },
+  });
+  if (firstOwnerId) {
+    sendSystemNotificationSafe({
+      userId: firstOwnerId,
+      title: "Đơn mua hàng Secondhand mới",
+      message: `Khách hàng ${finalAddress.recipientName} vừa đặt đơn mua hàng ${order.orderCode} (${productTitle}) trị giá ${totalAmount.toLocaleString("vi-VN")} VND.`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode, totalAmount },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Đơn mua hàng Secondhand mới trên sàn",
+    message: `Đơn mua ${order.orderCode} (${productTitle}) trị giá ${totalAmount.toLocaleString("vi-VN")} VND vừa được tạo bởi ${finalAddress.recipientName}.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/admin/thrift`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, totalAmount },
+  });
 
   return order;
 };
@@ -264,6 +298,37 @@ export const lockAndMarkOrderPaid = async (orderIdOrCode, paymentDetails = {}) =
       await ThriftListing.findByIdAndUpdate(listingId, { $set: { status: "APPROVED" } });
     }
   }
+
+  // 4. Bắn thông báo thanh toán đơn mua Secondhand thành công tới cả 3 role
+  const targetSellerId =
+    claimedOrder.shopOwnerId ||
+    claimedOrder.items?.find((it) => it.sellerId || it.ownerId)?.sellerId ||
+    claimedOrder.items?.find((it) => it.sellerId || it.ownerId)?.ownerId;
+  sendSystemNotificationSafe({
+    userId: claimedOrder.buyerId || claimedOrder.userId,
+    title: "Thanh toán đơn mua Secondhand thành công",
+    message: `Đơn hàng ${claimedOrder.orderCode} đã thanh toán thành công ${Number(claimedOrder.totalAmount || 0).toLocaleString("vi-VN")} VND. Shop đang chuẩn bị giao hàng.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${claimedOrder._id}`,
+    metadata: { orderId: claimedOrder._id, orderCode: claimedOrder.orderCode },
+  });
+  if (targetSellerId) {
+    sendSystemNotificationSafe({
+      userId: targetSellerId,
+      title: "Khách đã thanh toán đơn mua Secondhand",
+      message: `Đơn hàng ${claimedOrder.orderCode} đã được thanh toán (${Number(claimedOrder.totalAmount || 0).toLocaleString("vi-VN")} VND). Vui lòng xác nhận và gửi hàng.`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${claimedOrder.orderCode}`,
+      metadata: { orderId: claimedOrder._id, orderCode: claimedOrder.orderCode },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Đơn mua Secondhand đã thanh toán",
+    message: `Đơn hàng ${claimedOrder.orderCode} vừa hoàn tất thanh toán ${Number(claimedOrder.totalAmount || 0).toLocaleString("vi-VN")} VND vào quỹ Escrow.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/admin/thrift`,
+    metadata: { orderId: claimedOrder._id, orderCode: claimedOrder.orderCode },
+  });
 
   return claimedOrder;
 };
@@ -422,6 +487,36 @@ export const cancelThriftOrder = async (orderId, user, reason = "") => {
   order.cancellationReason = reason || "Khách hàng hủy đơn";
   await order.save();
 
+  const cancelSellerId =
+    order.shopOwnerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.sellerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.ownerId;
+  sendSystemNotificationSafe({
+    userId: order.buyerId,
+    title: "Đã hủy đơn mua Secondhand",
+    message: `Đơn hàng ${order.orderCode} đã được hủy thành công (${order.cancellationReason}).`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+  if (cancelSellerId) {
+    sendSystemNotificationSafe({
+      userId: cancelSellerId,
+      title: "Đơn mua Secondhand đã bị hủy",
+      message: `Đơn hàng ${order.orderCode} đã bị hủy. Lý do: ${order.cancellationReason}`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Đơn mua Secondhand bị hủy",
+    message: `Đơn hàng ${order.orderCode} đã bị hủy (${order.cancellationReason}).`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/admin/thrift`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   return order;
 };
 
@@ -514,6 +609,49 @@ export const updateThriftOrderStatus = async (orderId, user, updatePayload) => {
   if (sealCode !== undefined) order.sealCode = sealCode;
 
   await order.save();
+
+  // Gửi thông báo cập nhật trạng thái đơn mua Secondhand tới cả 3 role
+  const statusLabels = {
+    CONFIRMED: "đã được Shop xác nhận",
+    PREPARING: "đang được đóng gói & niêm phong",
+    SHIPPING: `đã được gửi đi (${order.courierName || "Đơn vị vận chuyển"} - Mã vận đơn: ${order.trackingCode || "N/A"})`,
+    DELIVERED: "đã giao hàng thành công",
+    COMPLETED: "đã hoàn tất và giải ngân ký quỹ",
+    CANCELLED: "đã bị hủy",
+  };
+  const labelText = statusLabels[order.status] || `cập nhật trạng thái ${order.status}`;
+  const sellerTargetId =
+    order.shopOwnerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.sellerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.ownerId ||
+    user._id;
+
+  sendSystemNotificationSafe({
+    userId: order.buyerId || order.userId,
+    title: `Cập nhật đơn mua ${order.orderCode}`,
+    message: `Đơn hàng Secondhand ${order.orderCode} của bạn ${labelText}.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, status: order.status },
+  });
+  if (sellerTargetId) {
+    sendSystemNotificationSafe({
+      userId: sellerTargetId,
+      title: `Đã cập nhật đơn mua ${order.orderCode}`,
+      message: `Đơn hàng Secondhand ${order.orderCode} ${labelText}.`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode, status: order.status },
+    });
+  }
+  notifyAdminsSafe({
+    title: `Cập nhật đơn mua Secondhand (${order.status})`,
+    message: `Đơn hàng ${order.orderCode} vừa ${labelText}.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/admin/thrift`,
+    metadata: { orderId: order._id, orderCode: order.orderCode, status: order.status },
+  });
+
   return order;
 };
 export const confirmDeliveredThriftOrder = async (orderId, user) => {
@@ -542,6 +680,38 @@ export const confirmDeliveredThriftOrder = async (orderId, user) => {
   order.buyerConfirmed = true;
   order.buyerConfirmedAt = new Date();
   await order.save();
+
+  const sellerTargetId =
+    order.shopOwnerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.sellerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.ownerId;
+
+  sendSystemNotificationSafe({
+    userId: order.buyerId || user._id,
+    title: "Đã xác nhận nhận hàng Secondhand",
+    message: `Bạn đã xác nhận nhận hàng thành công cho đơn mua ${order.orderCode}.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+  if (sellerTargetId) {
+    sendSystemNotificationSafe({
+      userId: sellerTargetId,
+      title: "Khách đã xác nhận nhận hàng Secondhand",
+      message: `Khách hàng đã xác nhận nhận hàng cho đơn mua ${order.orderCode}.`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Khách đã nhận đơn mua Secondhand",
+    message: `Đơn mua ${order.orderCode} đã được người mua xác nhận nhận hàng thành công.`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/admin/thrift`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   return order;
 };
 
@@ -585,5 +755,37 @@ export const disputeThriftOrder = async (orderId, user, { reason = "", problemIt
     reportedBy: user._id,
   };
   await order.save();
+
+  const sellerTargetId =
+    order.shopOwnerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.sellerId ||
+    order.items?.find((it) => it.sellerId || it.ownerId)?.ownerId;
+
+  sendSystemNotificationSafe({
+    userId: order.buyerId,
+    title: "Khiếu nại đơn mua Secondhand đã ghi nhận",
+    message: `Khiếu nại cho đơn hàng ${order.orderCode} đã được gửi tới Ban Trọng Tài (${order.disputeReason}).`,
+    type: NOTIFICATION_TYPE.THRIFT_ORDER,
+    link: `/thrift/orders/${order._id}`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+  if (sellerTargetId) {
+    sendSystemNotificationSafe({
+      userId: sellerTargetId,
+      title: "Đơn mua Secondhand có khiếu nại mới",
+      message: `Đơn hàng ${order.orderCode} vừa bị mở tranh chấp: ${order.disputeReason}`,
+      type: NOTIFICATION_TYPE.THRIFT_ORDER,
+      link: `/shop/thrift/orders/${order.orderCode}`,
+      metadata: { orderId: order._id, orderCode: order.orderCode },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Tranh chấp đơn mua Secondhand mới",
+    message: `Đơn hàng ${order.orderCode} vừa mở hồ sơ tranh chấp (${order.disputeReason}).`,
+    type: NOTIFICATION_TYPE.SYSTEM,
+    link: `/admin/disputes`,
+    metadata: { orderId: order._id, orderCode: order.orderCode },
+  });
+
   return order;
 };

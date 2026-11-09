@@ -16,7 +16,7 @@ import {
 import ThriftOrder, { THRIFT_ORDER_STATUS } from "../thrift/order/thriftOrder.model.js";
 import { lockAndMarkOrderPaid } from "../thrift/order/thriftOrder.service.js";
 import User from "../user/user.model.js";
-import { sendSystemNotificationSafe } from "../notification/notification.service.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../notification/notification.service.js";
 import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 import {
   buildVnPayUrl,
@@ -433,18 +433,36 @@ const processVnPayIpn = async (queryParams = {}) => {
       });
     }
 
-    // [BE-S6-02] Bắn thông báo thanh toán thành công
+    // [BE-S6-02] Bắn thông báo thanh toán thành công tới cả 3 role
     const payerId = order.renterId || order.buyerId || order.userId;
+    const sellerId = order.shopOwnerId || order.items?.[0]?.sellerId || order.items?.[0]?.ownerId;
     if (payerId) {
       sendSystemNotificationSafe({
         userId: payerId,
         title: "Thanh toán thành công",
         message: `Đơn hàng ${order.orderCode} đã thanh toán thành công qua VNPAY (${(order.totalAmount || 0).toLocaleString("vi-VN")} VND).`,
         type: NOTIFICATION_TYPE.PAYMENT,
-        link: isThrift ? `/thrift-orders/${order._id}` : `/orders/${order._id}`,
+        link: isThrift ? `/thrift/orders/${order._id}` : `/rent/orders/${order._id}`,
         metadata: { orderId: order._id, orderCode: order.orderCode, isThrift },
       });
     }
+    if (sellerId) {
+      sendSystemNotificationSafe({
+        userId: sellerId,
+        title: "Khách đã thanh toán đơn hàng",
+        message: `Đơn hàng ${order.orderCode} đã thanh toán ${Number(order.totalAmount || 0).toLocaleString("vi-VN")} VND qua VNPAY. Vui lòng chuẩn bị gửi hàng.`,
+        type: isThrift ? NOTIFICATION_TYPE.THRIFT_ORDER : NOTIFICATION_TYPE.RENTAL_ORDER,
+        link: isThrift ? `/shop/thrift/orders/${order.orderCode}` : `/shop/rent/orders/${order.orderCode}`,
+        metadata: { orderId: order._id, orderCode: order.orderCode, isThrift },
+      });
+    }
+    notifyAdminsSafe({
+      title: "Giao dịch VNPay thành công",
+      message: `Đơn hàng ${order.orderCode} đã quyết toán ${Number(order.totalAmount || 0).toLocaleString("vi-VN")} VND qua VNPay.`,
+      type: NOTIFICATION_TYPE.PAYMENT,
+      link: `/admin/finance`,
+      metadata: { orderId: order._id, orderCode: order.orderCode, isThrift },
+    });
 
     return { RspCode: "00", Message: "Confirm Success" };
   } else {
@@ -544,6 +562,35 @@ const processVnPayReturn = async (queryParams = {}) => {
         order.holdExpiresAt = null;
         await order.save();
         await confirmHoldSlotsForPaidOrder(order);
+
+        const payerId = order.renterId || order.buyerId || order.userId;
+        if (payerId) {
+          sendSystemNotificationSafe({
+            userId: payerId,
+            title: "Thanh toán đơn thuê thành công",
+            message: `Đơn thuê ${order.orderCode} đã thanh toán thành công qua VNPAY (${Number(order.totalAmount || 0).toLocaleString("vi-VN")} VND).`,
+            type: NOTIFICATION_TYPE.PAYMENT,
+            link: `/rent/orders/${order._id}`,
+            metadata: { orderId: order._id, orderCode: order.orderCode },
+          });
+        }
+        if (order.shopOwnerId) {
+          sendSystemNotificationSafe({
+            userId: order.shopOwnerId,
+            title: "Khách đã thanh toán đơn thuê",
+            message: `Đơn thuê ${order.orderCode} đã được khách thanh toán ${Number(order.totalAmount || 0).toLocaleString("vi-VN")} VND. Vui lòng chuẩn bị bàn giao đồ.`,
+            type: NOTIFICATION_TYPE.RENTAL_ORDER,
+            link: `/shop/rent/orders/${order.orderCode}`,
+            metadata: { orderId: order._id, orderCode: order.orderCode },
+          });
+        }
+        notifyAdminsSafe({
+          title: "Đơn thuê đã quyết toán VNPay",
+          message: `Đơn thuê ${order.orderCode} vừa thanh toán ${Number(order.totalAmount || 0).toLocaleString("vi-VN")} VND vào Smart Escrow.`,
+          type: NOTIFICATION_TYPE.PAYMENT,
+          link: `/admin/finance`,
+          metadata: { orderId: order._id, orderCode: order.orderCode },
+        });
       }
     }
 

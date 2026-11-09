@@ -2,6 +2,8 @@ import LockAppeal from "./lockAppeal.model.js";
 import { sendAccountUnlockEmail } from "../../utils/email.js";
 import User from "./user.model.js";
 import KycRecord from "../kyc/kyc.model.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../notification/notification.model.js";
 
 /**
  * Format user data returned to client
@@ -220,13 +222,29 @@ export const submitKyc = async (userId, data) => {
   await user.save();
 
   // Keep KycRecord collection synchronized
-  await KycRecord.create({
+  const kycRecord = await KycRecord.create({
     userId: user._id,
     idCardNumber: data.idCardNumber || data.citizenId || user.kyc?.citizenId || "04809400••••",
     frontImageUrl: data.frontImageUrl || data.cardFrontUrl || user.kyc?.cardFrontUrl || "https://example.com/front.jpg",
     backImageUrl: data.backImageUrl || data.cardBackUrl || user.kyc?.cardBackUrl || "https://example.com/back.jpg",
     status: "PENDING",
     rejectionReason: null,
+  });
+
+  sendSystemNotificationSafe({
+    userId: user._id,
+    title: "Đã gửi hồ sơ KYC",
+    message: "Hồ sơ định danh KYC của bạn đã được ghi nhận và đang chờ Admin phê duyệt.",
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/profile",
+    metadata: { userId: user._id, kycRecordId: kycRecord._id },
+  });
+  notifyAdminsSafe({
+    title: "Hồ sơ KYC mới cần phê duyệt",
+    message: `Người dùng ${user.fullName || user.email} vừa gửi hồ sơ KYC mới.`,
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/admin/kyc",
+    metadata: { userId: user._id, kycRecordId: kycRecord._id },
   });
 
   return getKycStatus(userId);
