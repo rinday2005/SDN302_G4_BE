@@ -185,6 +185,11 @@ export const updateListing = async (listingId, userId, updateData) => {
 export const getPublicListings = async (query = {}) => {
   const filter = { ...query };
   delete filter.includeSold;
+  delete filter.limit;
+  delete filter.page;
+  delete filter.sortBy;
+  delete filter.sortOrder;
+  delete filter.keyword;
 
   if (query.ownerId) {
     const oId = mongoose.Types.ObjectId.isValid(query.ownerId) ? new mongoose.Types.ObjectId(query.ownerId) : null;
