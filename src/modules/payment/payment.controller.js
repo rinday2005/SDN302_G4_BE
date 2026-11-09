@@ -77,7 +77,7 @@ const vnPayIpnController = async (req, res) => {
  * Được bọc try/catch an toàn tuyệt đối: Luôn redirect về Frontend (cổng 5173), không bao giờ làm sập kết nối
  */
 const vnPayReturnController = async (req, res) => {
-  const frontendBase = (process.env.FRONTEND_URL || FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+  let frontendBase = (process.env.FRONTEND_URL || FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
   const isAjax =
     req.xhr ||
     req.headers.accept?.includes("application/json") ||

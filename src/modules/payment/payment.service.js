@@ -33,7 +33,13 @@ import {
 const DEFAULT_HASH_SECRET = VNPAY_HASH_SECRET || "REUSE_HUB_VNPAY_SECRET_2026";
 const DEFAULT_TMN_CODE = VNPAY_TMN_CODE || "REUSEHUB";
 const DEFAULT_VNP_URL = VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-const DEFAULT_RETURN_URL = VNPAY_RETURN_URL || "http://localhost:5000/api/payments/vnpay-return";
+const defaultBackendBaseUrl = (
+  process.env.RENDER_EXTERNAL_URL ||
+  (process.env.RENDER || process.env.NODE_ENV === "production"
+    ? "https://sdn302-g4-be.onrender.com"
+    : "http://localhost:5000")
+).replace(/\/$/, "");
+const DEFAULT_RETURN_URL = VNPAY_RETURN_URL || `${defaultBackendBaseUrl}/api/payments/vnpay-return`;
 
 const createError = (message, statusCode, errorCode) => {
   const error = new Error(message);
