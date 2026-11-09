@@ -258,6 +258,32 @@ const createOrder = async ({
 
     createdOrders.push(order);
 
+    // [BE-S6-02] Bắn thông báo ngay cho Shop Owner khi có đơn thuê mới cần duyệt
+    if (shopOwnerId) {
+      const primaryItemName = orderItems?.[0]?.productName || orderItems?.[0]?.name || "Sản phẩm cho thuê";
+      User.findById(renterId).select("fullName email").lean().then((renterUser) => {
+        const renterDisplayName = renterUser?.fullName || "Khách hàng";
+        sendSystemNotificationSafe({
+          userId: shopOwnerId,
+          title: "Đơn thuê mới chờ duyệt",
+          message: `Khách hàng ${renterDisplayName} vừa gửi yêu cầu thuê đơn ${orderCode} ("${primaryItemName}"). Vui lòng kiểm tra và phê duyệt.`,
+          type: NOTIFICATION_TYPE.RENTAL_ORDER,
+          link: `/shop/rent/orders/${orderCode}`,
+          metadata: {
+            orderId: order._id,
+            orderCode,
+            productName: primaryItemName,
+            renterId,
+            renterName: renterDisplayName,
+            totalAmount,
+            depositAmount,
+            rentalFee,
+            status: order.status,
+          },
+        });
+      }).catch(() => {});
+    }
+
     groupSubtotal += rentalFee;
     groupDeposit += depositAmount;
     groupShipping += shippingFee;

@@ -223,6 +223,28 @@ export const createGroupCheckout = async ({
     totalDeposit += shopDepositAmount;
     totalShipping += shopShippingFee;
 
+    // Bắn thông báo ngay cho Shop Owner khi có đơn thuê mới cần duyệt
+    if (shopId) {
+      const primaryItemName = orderItemSnapshots?.[0]?.productName || orderItemSnapshots?.[0]?.name || "Sản phẩm cho thuê";
+      sendSystemNotificationSafe({
+        userId: shopId,
+        title: "Đơn thuê mới chờ duyệt",
+        message: `Khách hàng ${user?.fullName || "Khách hàng"} vừa gửi yêu cầu duyệt đơn thuê ${childOrderCode} ("${primaryItemName}").`,
+        type: NOTIFICATION_TYPE.RENTAL_ORDER,
+        link: `/shop/rent/orders/${childOrderCode}`,
+        metadata: {
+          orderId: childRentalOrder._id,
+          orderCode: childOrderCode,
+          productName: primaryItemName,
+          renterId: user?._id,
+          totalAmount: shopTotalAmount,
+          depositAmount: shopDepositAmount,
+          rentalFee: shopRentalFee,
+          status: childRentalOrder.status,
+        },
+      });
+    }
+
     childOrderResults.push({
       orderId: childRentalOrder._id,
       orderModel: "RentalOrder",
