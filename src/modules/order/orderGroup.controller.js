@@ -11,9 +11,22 @@ import {
 export const groupCheckoutController = async (req, res, next) => {
   try {
     const ipAddress =
-      req.headers["x-forwarded-for"] ||
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
       req.socket.remoteAddress ||
       "127.0.0.1";
+
+    const host = String(req.headers.host || "");
+    const isRemoteHost =
+      Boolean(host) && !host.includes("localhost") && !host.includes("127.0.0.1");
+    const originHeader = String(req.headers.origin || "").trim().replace(/\/$/, "");
+    let returnUrl = req.body.returnUrl ? String(req.body.returnUrl).trim() : "";
+    if (!returnUrl || (isRemoteHost && (returnUrl.includes("localhost") || returnUrl.includes("127.0.0.1")))) {
+      if (originHeader && !(isRemoteHost && (originHeader.includes("localhost") || originHeader.includes("127.0.0.1")))) {
+        returnUrl = `${originHeader}/payment-return`;
+      } else if (isRemoteHost) {
+        returnUrl = "https://sdn-302-g4-fe.vercel.app/payment-return";
+      }
+    }
 
     const result = await createGroupCheckout({
       user: req.user,
@@ -24,6 +37,7 @@ export const groupCheckoutController = async (req, res, next) => {
       selectedThriftItemIds: req.body.selectedThriftItemIds,
       note: req.body.note,
       ipAddress,
+      returnUrl,
     });
 
     return successResponse(

@@ -15,12 +15,44 @@ const getClientIp = (req) => {
   return rawIp === "::1" ? "127.0.0.1" : rawIp;
 };
 
+const resolveDynamicReturnUrl = (req) => {
+  const host = String(req.headers.host || "");
+  const isRemoteHost =
+    Boolean(host) && !host.includes("localhost") && !host.includes("127.0.0.1");
+  const bodyReturnUrl = req.body?.returnUrl
+    ? String(req.body.returnUrl).trim()
+    : "";
+
+  if (
+    bodyReturnUrl &&
+    !(isRemoteHost && (bodyReturnUrl.includes("localhost") || bodyReturnUrl.includes("127.0.0.1")))
+  ) {
+    return bodyReturnUrl;
+  }
+
+  const originHeader = String(req.headers.origin || "").trim().replace(/\/$/, "");
+  if (
+    originHeader &&
+    !(isRemoteHost && (originHeader.includes("localhost") || originHeader.includes("127.0.0.1")))
+  ) {
+    return `${originHeader}/payment-return`;
+  }
+
+  if (isRemoteHost) {
+    const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+    return `${proto}://${host}/api/payments/vnpay-return`;
+  }
+
+  return bodyReturnUrl || undefined;
+};
+
 /**
  * [BE-S3-04] POST /api/payments/create-vnpay-url
  */
 const createVnPayUrlController = async (req, res, next) => {
   try {
     const ipAddress = getClientIp(req);
+    const returnUrl = resolveDynamicReturnUrl(req);
     const result = await createVnPayPaymentUrl({
       user: req.user,
       orderId: req.body.orderId,
@@ -28,7 +60,7 @@ const createVnPayUrlController = async (req, res, next) => {
       orderCode: req.body.orderCode,
       type: req.body.type || "RENT",
       ipAddress,
-      returnUrl: req.body.returnUrl,
+      returnUrl,
       bankCode: req.body.bankCode,
       productId: req.body.productId,
       items: req.body.items,
@@ -77,7 +109,16 @@ const vnPayIpnController = async (req, res) => {
  * Được bọc try/catch an toàn tuyệt đối: Luôn redirect về Frontend (cổng 5173), không bao giờ làm sập kết nối
  */
 const vnPayReturnController = async (req, res) => {
+  const host = String(req.headers.host || "");
+  const isRemoteHost =
+    Boolean(host) && !host.includes("localhost") && !host.includes("127.0.0.1");
   let frontendBase = (process.env.FRONTEND_URL || FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+  if (
+    isRemoteHost &&
+    (frontendBase.includes("localhost") || frontendBase.includes("127.0.0.1"))
+  ) {
+    frontendBase = "https://sdn-302-g4-fe.vercel.app";
+  }
   const isAjax =
     req.xhr ||
     req.headers.accept?.includes("application/json") ||
