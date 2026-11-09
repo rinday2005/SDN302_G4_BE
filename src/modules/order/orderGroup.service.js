@@ -45,6 +45,7 @@ export const createGroupCheckout = async ({
   selectedThriftItemIds,
   note = "",
   ipAddress = "127.0.0.1",
+  returnUrl,
 }) => {
   if (!user || !user._id) {
     throw createError("Vui lòng đăng nhập để thực hiện thanh toán", 401, "UNAUTHORIZED");
@@ -417,7 +418,7 @@ export const createGroupCheckout = async ({
       tmnCode: DEFAULT_TMN_CODE,
       hashSecret: DEFAULT_HASH_SECRET,
       vnpUrl: DEFAULT_VNP_URL,
-      returnUrl: DEFAULT_RETURN_URL,
+      returnUrl: returnUrl || DEFAULT_RETURN_URL,
       ipAddr: ipAddress,
       amount: totalAmount,
       txnRef,
