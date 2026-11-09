@@ -5,6 +5,8 @@ import RentalOrder from "../../rent/order/order.model.js";
 import RentalAvailability from "../../rent/availability/availability.model.js";
 import cloudinary from "../../../config/cloudinary.js";
 import { normalizeShopBranch } from "../../../utils/shipping.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
 const FALLBACK_THRIFT_IMAGE =
   "https://images.unsplash.com/photo-1566174053879-31528523f8ae?w=800&auto=format&fit=crop&q=80";
@@ -103,6 +105,25 @@ export const createListing = async (userId, data) => {
     shopName: sName,
     status: "PENDING_APPROVAL",
   });
+
+  if (userId) {
+    sendSystemNotificationSafe({
+      userId,
+      title: "Đã đăng sản phẩm Secondhand mới",
+      message: `Sản phẩm thanh lý "${newListing.name}" đã được gửi lên hệ thống và đang chờ Admin phê duyệt.`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/shop/thrift`,
+      metadata: { listingId: newListing._id, status: newListing.status },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Sản phẩm Secondhand mới chờ duyệt",
+    message: `Xưởng "${sName}" vừa đăng sản phẩm thanh lý "${newListing.name}" cần phê duyệt.`,
+    type: NOTIFICATION_TYPE.LISTING,
+    link: `/admin/thrift`,
+    metadata: { listingId: newListing._id, shopName: sName, status: newListing.status },
+  });
+
   return newListing;
 };
 
@@ -138,6 +159,25 @@ export const updateListing = async (listingId, userId, updateData) => {
 
   Object.assign(listing, updateData);
   await listing.save();
+
+  if (userId) {
+    sendSystemNotificationSafe({
+      userId,
+      title: "Đã cập nhật sản phẩm Secondhand",
+      message: `Thông tin sản phẩm thanh lý "${listing.name}" đã được cập nhật.`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/shop/thrift`,
+      metadata: { listingId: listing._id, status: listing.status },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Sản phẩm Secondhand vừa được cập nhật",
+    message: `Sản phẩm thanh lý "${listing.name}" vừa được cập nhật thông tin.`,
+    type: NOTIFICATION_TYPE.LISTING,
+    link: `/admin/thrift`,
+    metadata: { listingId: listing._id, status: listing.status },
+  });
+
   return listing;
 };
 
@@ -145,6 +185,11 @@ export const updateListing = async (listingId, userId, updateData) => {
 export const getPublicListings = async (query = {}) => {
   const filter = { ...query };
   delete filter.includeSold;
+  delete filter.limit;
+  delete filter.page;
+  delete filter.sortBy;
+  delete filter.sortOrder;
+  delete filter.keyword;
 
   if (query.ownerId) {
     const oId = mongoose.Types.ObjectId.isValid(query.ownerId) ? new mongoose.Types.ObjectId(query.ownerId) : null;
@@ -296,6 +341,24 @@ export const convertFromRental = async (userId, data) => {
     status: initialStatus,
     sourceType: "RENTAL_PRODUCT",
     sourceRentalProductId: resolvedSourceProductId,
+  });
+
+  if (userId) {
+    sendSystemNotificationSafe({
+      userId,
+      title: "Chuyển đổi đồ thuê sang thanh lý thành công",
+      message: `Sản phẩm "${newListing.name}" đã được chuyển đổi từ kho thuê sang sàn Secondhand với giá ${Number(finalSellingPrice).toLocaleString("vi-VN")} VND.`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/shop/thrift`,
+      metadata: { listingId: newListing._id, rentalProductId: rentalProduct._id },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Sản phẩm tuần hoàn từ RENT sang THRIFT",
+    message: `Sản phẩm "${newListing.name}" vừa được chuyển đổi từ kho thuê sang bán thanh lý Secondhand.`,
+    type: NOTIFICATION_TYPE.LISTING,
+    link: `/admin/thrift`,
+    metadata: { listingId: newListing._id, rentalProductId: rentalProduct._id },
   });
 
   return newListing;

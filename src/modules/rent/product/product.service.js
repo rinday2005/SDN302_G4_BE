@@ -3,6 +3,8 @@ import RentalProduct from "./product.model.js";
 import RentalOrder from "../order/order.model.js";
 import cloudinary from "../../../config/cloudinary.js";
 import { normalizeShopBranch } from "../../../utils/shipping.js";
+import { sendSystemNotificationSafe, notifyAdminsSafe } from "../../notification/notification.service.js";
+import { NOTIFICATION_TYPE } from "../../notification/notification.model.js";
 
 const FALLBACK_PRODUCT_IMAGE =
   "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80";
@@ -118,6 +120,25 @@ const createProduct = async (productData, ownerId) => {
     status: "PENDING_APPROVAL",
   });
 
+  // Bắn thông báo cho Shop Owner và Admin khi tạo sản phẩm cho thuê
+  if (ownerId) {
+    sendSystemNotificationSafe({
+      userId: ownerId,
+      title: "Đã đăng sản phẩm cho thuê mới",
+      message: `Sản phẩm "${product.name}" đã được gửi lên hệ thống và đang chờ Admin phê duyệt.`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/shop/inventory`,
+      metadata: { productId: product._id, status: product.status },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Sản phẩm cho thuê mới chờ duyệt",
+    message: `Xưởng "${shopName}" vừa đăng sản phẩm cho thuê "${product.name}" cần phê duyệt.`,
+    type: NOTIFICATION_TYPE.LISTING,
+    link: `/admin/rent`,
+    metadata: { productId: product._id, shopName, status: product.status },
+  });
+
   return product;
 };
 
@@ -171,6 +192,24 @@ const updateProduct = async (productId, ownerId, updateData) => {
   if (safeUpdateData.location !== undefined) product.location = normalizeShopBranch(safeUpdateData.location);
 
   await product.save();
+
+  if (ownerId) {
+    sendSystemNotificationSafe({
+      userId: ownerId,
+      title: "Đã cập nhật sản phẩm cho thuê",
+      message: `Thông tin sản phẩm "${product.name}" đã được cập nhật thành công.`,
+      type: NOTIFICATION_TYPE.LISTING,
+      link: `/shop/inventory`,
+      metadata: { productId: product._id, status: product.status },
+    });
+  }
+  notifyAdminsSafe({
+    title: "Sản phẩm cho thuê vừa được cập nhật",
+    message: `Sản phẩm cho thuê "${product.name}" vừa được cập nhật thông tin bởi chủ xưởng.`,
+    type: NOTIFICATION_TYPE.LISTING,
+    link: `/admin/rent`,
+    metadata: { productId: product._id, status: product.status },
+  });
 
   return product;
 };

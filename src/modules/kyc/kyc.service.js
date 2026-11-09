@@ -99,7 +99,15 @@ export const submitKycApplication = async (userId, data = {}) => {
   user.kyc.rejectionReason = null;
   await user.save();
 
-  // Bắn thông báo realtime tới toàn bộ Admin
+  // Bắn thông báo tới User và toàn bộ Admin
+  sendSystemNotificationSafe({
+    userId: user._id,
+    title: "Đã gửi hồ sơ KYC thành công",
+    message: "Hồ sơ định danh căn cước của bạn đã được gửi và đang chờ Admin phê duyệt.",
+    type: NOTIFICATION_TYPE.KYC,
+    link: "/profile",
+    metadata: { userId: user._id, kycRecordId: kycRecord._id },
+  });
   notifyAdminsSafe({
     title: "Hồ sơ KYC mới cần phê duyệt",
     message: `Người dùng ${user.fullName || user.email} đã nộp hồ sơ KYC căn cước công dân.`,
@@ -196,7 +204,7 @@ export const reviewKycApplication = async (recordId, { status, rejectionReason }
     // Role is preserved exactly as is!
     await user.save();
 
-    // Bắn thông báo kết quả duyệt KYC tới User
+    // Bắn thông báo kết quả duyệt KYC tới User & Admin
     sendSystemNotificationSafe({
       userId: user._id,
       title: status === KYC_STATUS.APPROVED ? "Xác thực KYC thành công" : "Hồ sơ KYC chưa được phê duyệt",
@@ -207,6 +215,13 @@ export const reviewKycApplication = async (recordId, { status, rejectionReason }
       type: NOTIFICATION_TYPE.KYC,
       link: "/profile",
       metadata: { status, rejectionReason },
+    });
+    notifyAdminsSafe({
+      title: status === KYC_STATUS.APPROVED ? "Đã phê duyệt hồ sơ KYC" : "Đã từ chối hồ sơ KYC",
+      message: `Hồ sơ KYC của ${user.fullName || user.email} đã được cập nhật trạng thái: ${status}.`,
+      type: NOTIFICATION_TYPE.KYC,
+      link: "/admin/kyc",
+      metadata: { userId: user._id, status },
     });
   }
 
