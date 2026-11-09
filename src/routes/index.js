@@ -105,8 +105,10 @@ router.use(
 );
 
 // ======================================================
-// RENT ORDER
+// RENT ORDER & GROUP CHECKOUT
 // ======================================================
+router.use("/api/orders", orderGroupRouter);
+router.use("/api/order-groups", orderGroupRouter);
 
 // NOTE [BE-S3-02]:
 // Rental order APIs moved from /api/orders to /api/rent/orders

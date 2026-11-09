@@ -886,13 +886,17 @@ export const resolveDisputeService = async (
 
     // Bắn thông báo phán quyết tranh chấp tới cả 3 role
     if (disputeDoc.renter?.id) {
+      const renterVerdictMsg =
+        refundAmt === 0 && payoutAmt > 0
+          ? `Hồ sơ tranh chấp #${disputeDoc.disputeCode} (Đơn ${disputeDoc.orderCode}) đã được giải quyết. Trừ cọc đối với bạn để đền bù thiệt hại cho Shop: -${payoutAmt.toLocaleString("vi-VN")} VND (Hoàn cọc: 0 VND).`
+          : `Hồ sơ tranh chấp #${disputeDoc.disputeCode} (Đơn ${disputeDoc.orderCode}) đã được giải quyết. Hoàn về ví của bạn: ${refundAmt.toLocaleString("vi-VN")} VND.`;
       sendSystemNotificationSafe({
         userId: disputeDoc.renter.id,
         title: "Phán quyết tranh chấp đã ban hành",
-        message: `Hồ sơ tranh chấp #${disputeDoc.disputeCode} (Đơn ${disputeDoc.orderCode}) đã được giải quyết. Hoàn về ví của bạn: ${refundAmt.toLocaleString("vi-VN")} VND.`,
+        message: renterVerdictMsg,
         type: NOTIFICATION_TYPE.REFUND,
         link: `/user/wallet`,
-        metadata: { disputeCode: disputeDoc.disputeCode, orderCode: disputeDoc.orderCode, refundAmt },
+        metadata: { disputeCode: disputeDoc.disputeCode, orderCode: disputeDoc.orderCode, refundAmt, payoutAmt },
       });
     }
     if (disputeDoc.shopOwner?.id) {
